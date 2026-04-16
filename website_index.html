@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nearfo - Know Your Circle | Location-Based Social Platform</title>
+  <meta name="description" content="Nearfo is a location-based social media app. Discover people, posts, and events near you. Connect with your local community within 200km radius.">
+  <meta name="keywords" content="Nearfo, social media, location based, local community, nearby posts, social app, India, connect locally">
+  <meta name="author" content="Nearfo">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://nearfo.com">
+
+  <!-- Open Graph / Social -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nearfo.com">
+  <meta property="og:title" content="Nearfo - Know Your Circle">
+  <meta property="og:description" content="Location-based social media app. Discover people and posts near you within 200km.">
+  <meta property="og:image" content="https://nearfo.com/og-image.png">
+  <meta property="og:site_name" content="Nearfo">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Nearfo - Know Your Circle">
+  <meta name="twitter:description" content="Location-based social media app. Discover people and posts near you.">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%237C3AED'/><text x='50' y='68' font-size='55' font-weight='900' text-anchor='middle' fill='white'>N</text></svg>">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0A0A0F;
+      --card: #14141F;
+      --card-hover: #1A1A2E;
+      --primary: #7C3AED;
+      --primary-light: #A78BFA;
+      --accent: #06B6D4;
+      --text: #F1F5F9;
+      --text-muted: #94A3B8;
+      --text-dim: #64748B;
+      --border: #1E1E30;
+      --success: #10B981;
+      --pink: #EC4899;
+      --warning: #F59E0B;
+    }
+
+    body {
+      font-family: 'Space Grotesk', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+      line-height: 1.6;
+    }
+
+    /* Navbar */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      padding: 16px 0;
+      background: rgba(10, 10, 15, 0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: 1200px; margin: 0 auto; padding: 0 24px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 10px; text-decoration: none;
+    }
+    .logo-icon {
+      width: 40px; height: 40px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 20px; color: white;
+    }
+    .logo-text {
+      font-size: 22px; font-weight: 800; color: var(--text);
+      background: linear-gradient(135deg, var(--primary-light), var(--accent));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .nav-links { display: flex; gap: 32px; align-items: center; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; font-weight: 500; font-size: 14px; transition: color 0.3s; }
+    .nav-links a:hover { color: var(--text); }
+    .btn-download {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: white; padding: 10px 24px; border-radius: 12px; font-weight: 700;
+      text-decoration: none; font-size: 14px; transition: transform 0.3s, box-shadow 0.3s;
+    }
+    .btn-download:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(124, 58, 237, 0.4); }
+
+    /* Hero */
+    .hero {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 120px 24px 80px; position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: ''; position: absolute; top: -200px; left: 50%; transform: translateX(-50%);
+      width: 800px; height: 800px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(124,58,237,0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-inner {
+      max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 80px;
+    }
+    .hero-content { flex: 1; }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.3);
+      padding: 6px 16px; border-radius: 50px; font-size: 13px; color: var(--primary-light);
+      margin-bottom: 24px; font-weight: 600;
+    }
+    .hero-badge span { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .hero h1 {
+      font-size: clamp(36px, 5vw, 60px); font-weight: 800; line-height: 1.1;
+      margin-bottom: 20px;
+    }
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, var(--primary-light), var(--accent));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 18px; color: var(--text-muted); max-width: 500px;
+      margin-bottom: 36px; line-height: 1.7;
+    }
+    .hero-buttons { display: flex; gap: 16px; flex-wrap: wrap; }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: white; padding: 16px 36px; border-radius: 16px; font-weight: 700;
+      text-decoration: none; font-size: 16px; display: inline-flex; align-items: center; gap: 10px;
+      transition: transform 0.3s, box-shadow 0.3s; border: none; cursor: pointer;
+    }
+    .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 12px 30px rgba(124,58,237,0.4); }
+    .btn-secondary {
+      background: var(--card); color: var(--text); padding: 16px 36px; border-radius: 16px;
+      font-weight: 700; text-decoration: none; font-size: 16px; border: 1px solid var(--border);
+      display: inline-flex; align-items: center; gap: 10px; transition: all 0.3s; cursor: pointer;
+    }
+    .btn-secondary:hover { background: var(--card-hover); border-color: var(--primary); }
+    .hero-visual {
+      flex: 0 0 320px; position: relative;
+    }
+    .phone-mockup {
+      width: 280px; height: 560px; background: var(--card); border-radius: 40px;
+      border: 3px solid var(--border); position: relative; overflow: hidden;
+      box-shadow: 0 30px 60px rgba(0,0,0,0.5), 0 0 80px rgba(124,58,237,0.1);
+    }
+    .phone-notch {
+      position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 120px; height: 28px; background: var(--bg); border-radius: 0 0 16px 16px;
+      z-index: 2;
+    }
+    .phone-screen {
+      width: 100%; height: 100%; background: var(--bg); padding: 40px 16px 16px;
+    }
+    .phone-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
+    }
+    .phone-logo { font-size: 18px; font-weight: 800; color: var(--primary-light); }
+    .phone-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--accent)); }
+    .phone-card {
+      background: var(--card); border-radius: 16px; padding: 14px; margin-bottom: 10px;
+      border: 1px solid var(--border);
+    }
+    .phone-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .phone-card-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--pink), var(--primary)); }
+    .phone-card-name { font-size: 12px; font-weight: 700; }
+    .phone-card-meta { font-size: 9px; color: var(--text-dim); }
+    .phone-card-text { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+    .phone-card-badge {
+      display: inline-block; background: rgba(6,182,212,0.15); color: var(--accent);
+      padding: 2px 8px; border-radius: 8px; font-size: 9px; font-weight: 600; margin-top: 6px;
+    }
+    .phone-card-actions {
+      display: flex; gap: 16px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+    }
+    .phone-card-action { font-size: 9px; color: var(--text-dim); }
+
+    /* Stats */
+    .stats {
+      padding: 60px 24px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    }
+    .stats-inner {
+      max-width: 1000px; margin: 0 auto;
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; text-align: center;
+    }
+    .stat-number {
+      font-size: 36px; font-weight: 800;
+      background: linear-gradient(135deg, var(--primary-light), var(--accent));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .stat-label { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Features */
+    .features { padding: 100px 24px; }
+    .features-inner { max-width: 1200px; margin: 0 auto; }
+    .section-label {
+      text-align: center; font-size: 13px; font-weight: 700; color: var(--primary-light);
+      text-transform: uppercase; letter-spacing: 3px; margin-bottom: 12px;
+    }
+    .section-title {
+      text-align: center; font-size: clamp(28px, 4vw, 42px); font-weight: 800; margin-bottom: 16px;
+    }
+    .section-desc {
+      text-align: center; font-size: 16px; color: var(--text-muted); max-width: 600px;
+      margin: 0 auto 60px;
+    }
+    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+    .feature-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 20px;
+      padding: 32px; transition: all 0.3s;
+    }
+    .feature-card:hover { border-color: var(--primary); transform: translateY(-4px);
+      box-shadow: 0 16px 40px rgba(124,58,237,0.1);
+    }
+    .feature-icon {
+      width: 56px; height: 56px; border-radius: 16px; display: flex;
+      align-items: center; justify-content: center; font-size: 26px; margin-bottom: 20px;
+    }
+    .feature-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+    .feature-card p { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+
+    /* How It Works */
+    .how-it-works { padding: 100px 24px; background: var(--card); }
+    .how-inner { max-width: 900px; margin: 0 auto; }
+    .steps { display: flex; flex-direction: column; gap: 40px; margin-top: 40px; }
+    .step {
+      display: flex; align-items: flex-start; gap: 24px;
+    }
+    .step-number {
+      flex: 0 0 56px; height: 56px; border-radius: 16px;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; font-weight: 800; color: white;
+    }
+    .step h3 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .step p { font-size: 14px; color: var(--text-muted); }
+
+    /* CTA */
+    .cta {
+      padding: 100px 24px; text-align: center; position: relative; overflow: hidden;
+    }
+    .cta::before {
+      content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 600px; height: 600px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%);
+    }
+    .cta h2 { font-size: clamp(28px, 4vw, 42px); font-weight: 800; margin-bottom: 16px; position: relative; }
+    .cta p { font-size: 16px; color: var(--text-muted); margin-bottom: 36px; position: relative; }
+
+    /* Footer */
+    footer {
+      padding: 40px 24px; border-top: 1px solid var(--border); text-align: center;
+    }
+    .footer-inner { max-width: 1200px; margin: 0 auto; }
+    .footer-links { display: flex; gap: 24px; justify-content: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .footer-links a { color: var(--text-dim); text-decoration: none; font-size: 13px; transition: color 0.3s; }
+    .footer-links a:hover { color: var(--text); }
+    .footer-copy { font-size: 12px; color: var(--text-dim); }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .hero-inner { flex-direction: column; text-align: center; gap: 40px; }
+      .hero p { margin: 0 auto 36px; }
+      .hero-buttons { justify-content: center; }
+      .hero-visual { flex: none; }
+      .features-grid { grid-template-columns: 1fr; }
+      .stats-inner { grid-template-columns: repeat(2, 1fr); }
+      .nav-links { display: none; }
+    }
+    @media (max-width: 600px) {
+      .hero-buttons { flex-direction: column; align-items: center; }
+      .btn-primary, .btn-secondary { width: 100%; justify-content: center; }
+      .stats-inner { grid-template-columns: repeat(2, 1fr); gap: 24px; }
+    }
+
+    /* Animations */
+    .fade-in {
+      opacity: 0; transform: translateY(30px);
+      transition: opacity 0.8s ease, transform 0.8s ease;
+    }
+    .fade-in.visible { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="logo">
+        <div class="logo-icon">N</div>
+        <span class="logo-text">nearfo</span>
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#download">Download</a>
+        <a href="mailto:er.akashsmorey@gmail.com">Contact</a>
+      </div>
+      <a href="#download" class="btn-download">Download APK</a>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero" id="home">
+    <div class="hero-inner">
+      <div class="hero-content fade-in">
+        <div class="hero-badge">
+          <span>&#x1F4CD;</span> Location-First Social Platform
+        </div>
+        <h1>Discover Your <br><span class="gradient">Local Circle</span></h1>
+        <p>Connect with people near you. Share vibes, explore local posts, and build real community connections within your 200km radius.</p>
+        <div class="hero-buttons">
+          <a href="#download" class="btn-primary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L4.5 20.3l.7.7L12 18l6.8 3 .7-.7z"/></svg>
+            Download for Android
+          </a>
+          <a href="#features" class="btn-secondary">
+            Learn More
+          </a>
+        </div>
+      </div>
+      <div class="hero-visual fade-in">
+        <div class="phone-mockup">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <div class="phone-header">
+              <div class="phone-logo">nearfo</div>
+              <div class="phone-avatar"></div>
+            </div>
+            <div class="phone-card">
+              <div class="phone-card-header">
+                <div class="phone-card-avatar"></div>
+                <div>
+                  <div class="phone-card-name">Priya Sharma</div>
+                  <div class="phone-card-meta">@priya &middot; 2h ago</div>
+                </div>
+              </div>
+              <div class="phone-card-text">Just discovered this amazing cafe near Connaught Place! The vibes here are unreal &#x2728;</div>
+              <div class="phone-card-badge">&#x1F4CD; 3.2 km away</div>
+              <div class="phone-card-actions">
+                <span class="phone-card-action">&#x2764; 24</span>
+                <span class="phone-card-action">&#x1F4AC; 8</span>
+                <span class="phone-card-action">&#x1F504; 3</span>
+              </div>
+            </div>
+            <div class="phone-card">
+              <div class="phone-card-header">
+                <div class="phone-card-avatar" style="background: linear-gradient(135deg, var(--accent), var(--success))"></div>
+                <div>
+                  <div class="phone-card-name">Rahul Dev</div>
+                  <div class="phone-card-meta">@rahul &middot; 5h ago</div>
+                </div>
+              </div>
+              <div class="phone-card-text">Weekend cricket match at the local ground! Who's joining? &#x1F3CF;</div>
+              <div class="phone-card-badge">&#x1F4CD; 12 km away</div>
+              <div class="phone-card-actions">
+                <span class="phone-card-action">&#x2764; 42</span>
+                <span class="phone-card-action">&#x1F4AC; 15</span>
+                <span class="phone-card-action">&#x1F504; 7</span>
+              </div>
+            </div>
+            <div class="phone-card">
+              <div class="phone-card-header">
+                <div class="phone-card-avatar" style="background: linear-gradient(135deg, var(--warning), var(--pink))"></div>
+                <div>
+                  <div class="phone-card-name">Ananya K</div>
+                  <div class="phone-card-meta">@ananya &middot; 1d ago</div>
+                </div>
+              </div>
+              <div class="phone-card-text">Street food festival this weekend! Tag your foodie friends &#x1F35C;</div>
+              <div class="phone-card-badge" style="background: rgba(236,72,153,0.15); color: var(--pink);">&#x1F30D; Global</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats -->
+  <section class="stats">
+    <div class="stats-inner fade-in">
+      <div>
+        <div class="stat-number">200km</div>
+        <div class="stat-label">Local Radius</div>
+      </div>
+      <div>
+        <div class="stat-number">80/20</div>
+        <div class="stat-label">Local/Global Feed</div>
+      </div>
+      <div>
+        <div class="stat-number">Free</div>
+        <div class="stat-label">No Ads, No Cost</div>
+      </div>
+      <div>
+        <div class="stat-number">India</div>
+        <div class="stat-label">Made in India</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features" id="features">
+    <div class="features-inner">
+      <div class="section-label fade-in">Features</div>
+      <h2 class="section-title fade-in">Everything You Need to <span style="color: var(--primary-light)">Connect Locally</span></h2>
+      <p class="section-desc fade-in">Nearfo is built for real connections. See what's happening around you, share your vibes, and be part of your local community.</p>
+      <div class="features-grid">
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background: rgba(6,182,212,0.1);">&#x1F4CD;</div>
+          <h3>Location-Based Feed</h3>
+          <p>See 80% local posts from within 200km and 20% trending global content. Your feed is truly yours.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background: rgba(236,72,153,0.1);">&#x1F4AC;</div>
+          <h3>Real-Time Chat</h3>
+          <p>Message people near you instantly with Socket.io powered real-time messaging. No delays, just vibes.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background: rgba(245,158,11,0.1);">&#x1F525;</div>
+          <h3>Mood & Vibes</h3>
+          <p>Express yourself with mood tags on every post. Let people know your vibe before they even read your post.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background: rgba(16,185,129,0.1);">&#x1F5BC;</div>
+          <h3>Photos & Videos</h3>
+          <p>Share photos and videos with your posts. Capture and share moments from your local area with everyone.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background: rgba(124,58,237,0.1);">&#x1F50D;</div>
+          <h3>Discover & Explore</h3>
+          <p>Find trending hashtags, popular posts, and interesting people near you with our smart discovery feed.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background: rgba(239,68,68,0.1);">&#x1F514;</div>
+          <h3>Push Notifications</h3>
+          <p>Never miss a like, comment, or message. Get instant notifications for all activity on your posts.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works -->
+  <section class="how-it-works" id="how-it-works">
+    <div class="how-inner">
+      <div class="section-label fade-in">How It Works</div>
+      <h2 class="section-title fade-in">Get Started in <span style="color: var(--accent)">3 Simple Steps</span></h2>
+      <div class="steps">
+        <div class="step fade-in">
+          <div class="step-number">1</div>
+          <div>
+            <h3>Download & Sign Up</h3>
+            <p>Download the APK, enter your phone number, verify with OTP, and set up your profile. It takes less than a minute.</p>
+          </div>
+        </div>
+        <div class="step fade-in">
+          <div class="step-number">2</div>
+          <div>
+            <h3>Enable Location</h3>
+            <p>Allow location permission so Nearfo can show you posts and people within your 200km radius. Your exact location is never shared publicly.</p>
+          </div>
+        </div>
+        <div class="step fade-in">
+          <div class="step-number">3</div>
+          <div>
+            <h3>Start Vibing!</h3>
+            <p>Post your thoughts, explore local content, chat with nearby people, and discover what's happening around you. Welcome to your circle!</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA / Download -->
+  <section class="cta" id="download">
+    <h2 class="fade-in">Ready to Join Your <span style="color: var(--primary-light)">Local Circle</span>?</h2>
+    <p class="fade-in">Download Nearfo now and start connecting with people around you.</p>
+    <a href="https://github.com/erakashsmorey-debug/nearfo-flutter-app/actions" class="btn-primary fade-in" style="font-size: 18px; padding: 18px 48px;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 2H6.477L2 6.477V17.52L6.477 22h11.046L22 17.52V6.477zM12 17.09L7.41 12.5l1.41-1.41L11 13.27V7h2v6.27l2.18-2.18 1.41 1.41z"/></svg>
+      Download APK (Android)
+    </a>
+    <p class="fade-in" style="margin-top: 16px; font-size: 13px; color: var(--text-dim);">
+      Version 1.0.0 &middot; Android 6.0+ &middot; ~27 MB
+    </p>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-links">
+        <a href="#home">Home</a>
+        <a href="#features">Features</a>
+        <a href="#download">Download</a>
+        <a href="mailto:er.akashsmorey@gmail.com">Contact</a>
+        <a href="#">Privacy Policy</a>
+        <a href="#">Terms of Service</a>
+      </div>
+      <p class="footer-copy">&copy; 2026 Nearfo. Made with &#x2764; in India. Know Your Circle.</p>
+    </div>
+  </footer>
+
+  <!-- Scroll Animation Script -->
+  <script>
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+
+    // Smooth scroll
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        const target = document.querySelector(a.getAttribute('href'));
+        if (target) target.scrollIntoView({ behavior: 'smooth' });
+      });
+    });
+  </script>
+
+  <!-- Structured Data for Google -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "MobileApplication",
+    "name": "Nearfo",
+    "operatingSystem": "Android",
+    "applicationCategory": "SocialNetworkingApplication",
+    "description": "Location-based social media app. Discover people, posts, and events near you within 200km.",
+    "url": "https://nearfo.com",
+    "author": {
+      "@type": "Organization",
+      "name": "Nearfo"
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "INR"
+    }
+  }
+  </script>
+</body>
+</html>

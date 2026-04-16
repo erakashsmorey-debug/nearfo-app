@@ -1,0 +1,2758 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../utils/constants.dart';
+import '../models/user_model.dart';
+import '../models/post_model.dart';
+import '../models/notification_model.dart';
+import '../models/reel_model.dart';
+import 'dart:async';
+
+class ApiService {
+  static const String _baseUrl = NearfoConfig.apiBaseUrl;
+  static String? _authToken;
+  static const Duration _timeout = Duration(seconds: 30);
+
+  /// Get correct MediaType from file extension for multipart uploads
+  static MediaType _getMediaType(String filePath) {
+    final ext = filePath.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return MediaType('image', 'jpeg');
+      case 'png':
+        return MediaType('image', 'png');
+      case 'gif':
+        return MediaType('image', 'gif');
+      case 'webp':
+        return MediaType('image', 'webp');
+      case 'heic':
+      case 'heif':
+        return MediaType('image', 'heic');
+      case 'mp4':
+        return MediaType('video', 'mp4');
+      case 'mov':
+        return MediaType('video', 'quicktime');
+      case 'mp3':
+        return MediaType('audio', 'mpeg');
+      case 'wav':
+        return MediaType('audio', 'wav');
+      case 'ogg':
+        return MediaType('audio', 'ogg');
+      case 'aac':
+      case 'm4a':
+        return MediaType('audio', 'mp4');
+      default:
+        return MediaType('application', 'octet-stream');
+    }
+  }
+
+  // ===== TOKEN MANAGEMENT (Encrypted via flutter_secure_storage) =====
+
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+  static const _tokenKey = 'auth_token';
+
+  static Future<void> loadToken() async {
+    try {
+      _authToken = await _secureStorage.read(key: _tokenKey);
+    } catch (e) {
+      // Fallback: migrate from old SharedPreferences if secure storage fails
+      debugPrint('[ApiService] Secure storage read failed, trying migration: $e');
+      final prefs = await SharedPreferences.getInstance();
+      final oldToken = prefs.getString('auth_token');
+      if (oldToken != null && oldToken.isNotEmpty) {
+        _authToken = oldToken;
+        // Migrate to secure storage
+        try {
+          await _secureStorage.write(key: _tokenKey, value: oldToken);
+          await prefs.remove('auth_token'); // Remove from insecure storage
+          debugPrint('[ApiService] Token migrated to secure storage');
+        } catch (_) {}
+      }
+    }
+  }
+
+  static Future<void> saveToken(String token) async {
+    _authToken = token;
+    try {
+      await _secureStorage.write(key: _tokenKey, value: token);
+    } catch (e) {
+      debugPrint('[ApiService] Secure storage write failed: $e');
+      // Fallback to SharedPreferences if secure storage fails
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('auth_token', token);
+    }
+  }
+
+  static Future<void> clearToken() async {
+    _authToken = null;
+    try {
+      await _secureStorage.delete(key: _tokenKey);
+    } catch (e) {
+      debugPrint('[ApiService] Secure storage delete failed: $e');
+    }
+    // Also clear from SharedPreferences (in case of old data)
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+  }
+
+  static bool get isLoggedIn => _authToken != null && _authToken!.isNotEmpty;
+
+  static Map<String, String> get _headers => {
+    'Content-Type': 'application/json',
+    if (_authToken != null) 'Authorization': 'Bearer $_authToken',
+  };
+
+  /// Callback to trigger logout when token expires (set by AuthProvider)
+  static void Function()? onSessionExpired;
+
+  /// Safely decode JSON from HTTP response, checking for 401 first
+  static Map<String, dynamic> _decodeResponse(http.Response res) {
+    // Detect token expiry
+    if (res.statusCode == 401 || res.statusCode == 403) {
+      onSessionExpired?.call();
+      throw Exception('Session expired. Please login again.');
+    }
+    try {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw Exception('Invalid server response (status ${res.statusCode})');
+    }
+  }
+
+  // ===== AUTH ENDPOINTS =====
+
+  /// POST /api/auth/send-otp — Send OTP to phone number
+  static Future<ApiResponse<String>> sendOTP({required String phone}) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/auth/send-otp'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'phone': phone}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        // In dev mode, server returns OTP for testing
+        final otp = data['otp']?.toString();
+        return ApiResponse.success(otp ?? 'sent');
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to send OTP');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/auth/verify-otp — Verify OTP and login/register
+  static Future<ApiResponse<UserModel>> verifyOTP({
+    required String phone,
+    required String otp,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/auth/verify-otp'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'phone': phone, 'otp': otp}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        await saveToken(data['token']);
+        return ApiResponse.success(
+          UserModel.fromJson(data['user']),
+          isNewUser: data['isNewUser'] ?? false,
+        );
+      }
+      return ApiResponse.error(data['message'] ?? 'Verification failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/auth/firebase-login — Verify Firebase ID token and login/register
+  static Future<ApiResponse<UserModel>> verifyFirebaseToken({
+    required String idToken,
+    required String phone,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/auth/firebase-login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'idToken': idToken, 'phone': phone}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        await saveToken(data['token']);
+        return ApiResponse.success(
+          UserModel.fromJson(data['user']),
+          isNewUser: data['isNewUser'] ?? false,
+        );
+      }
+      return ApiResponse.error(data['message'] ?? 'Login failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/auth/verify-phone (legacy Firebase method)
+  static Future<ApiResponse<UserModel>> verifyPhone({
+    required String firebaseToken,
+    required String phone,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/auth/verify-phone'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'firebaseToken': firebaseToken,
+          'phone': phone,
+        }),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        await saveToken(data['token']);
+        return ApiResponse.success(
+          UserModel.fromJson(data['user']),
+          isNewUser: data['isNewUser'] ?? false,
+        );
+      }
+      return ApiResponse.error(data['message'] ?? 'Verification failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// PUT /api/auth/setup-profile
+  static Future<ApiResponse<UserModel>> setupProfile({
+    required String name,
+    required String handle,
+    String? bio,
+    String? avatarUrl,
+    required double latitude,
+    required double longitude,
+    required String city,
+    required String state,
+    DateTime? dateOfBirth,
+    bool showDobOnProfile = true,
+  }) async {
+    try {
+      final body = {
+          'name': name,
+          'handle': handle,
+          'bio': bio ?? '',
+          'avatarUrl': avatarUrl ?? '',
+          'latitude': latitude,
+          'longitude': longitude,
+          'city': city,
+          'state': state,
+          'showDobOnProfile': showDobOnProfile,
+      };
+      if (dateOfBirth != null) {
+        body['dateOfBirth'] = dateOfBirth.toIso8601String();
+      }
+      final res = await http.put(
+        Uri.parse('$_baseUrl/auth/setup-profile'),
+        headers: _headers,
+        body: jsonEncode(body),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(UserModel.fromJson(data['user']));
+      }
+      return ApiResponse.error(data['message'] ?? 'Profile setup failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/auth/me
+  static Future<ApiResponse<UserModel>> getMe() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/auth/me'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = _decodeResponse(res);
+      if (data['success'] == true && data['user'] != null) {
+        return ApiResponse.success(UserModel.fromJson(data['user']));
+      }
+      return ApiResponse.error(data['message']?.toString() ?? 'Failed to get user');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/auth/analytics
+  static Future<ApiResponse<Map<String, dynamic>>> getAnalytics() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/auth/analytics'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true && data['analytics'] != null) {
+        final a = Map<String, dynamic>.from(data['analytics']);
+        // Flatten nested structure for easy screen consumption
+        final posts = a['posts'] is Map ? Map<String, dynamic>.from(a['posts']) : <String, dynamic>{};
+        final reels = a['reels'] is Map ? Map<String, dynamic>.from(a['reels']) : <String, dynamic>{};
+        final weekly = a['weekly'] is Map ? Map<String, dynamic>.from(a['weekly']) : <String, dynamic>{};
+        final flat = <String, dynamic>{
+          'totalPosts': posts['totalPosts'] ?? a['totalPosts'] ?? 0,
+          'totalReels': reels['totalReels'] ?? a['totalReels'] ?? 0,
+          'followersCount': a['followers'] ?? a['followersCount'] ?? 0,
+          'followingCount': a['following'] ?? a['followingCount'] ?? 0,
+          'totalLikes': (posts['totalLikes'] ?? 0) + (reels['totalLikes'] ?? 0),
+          'totalReelViews': reels['totalViews'] ?? a['totalReelViews'] ?? 0,
+          'totalComments': (posts['totalComments'] ?? 0) + (reels['totalComments'] ?? 0),
+          'engagementRate': a['engagementRate'] ?? 0,
+          'postsThisWeek': weekly['posts'] ?? a['postsThisWeek'] ?? 0,
+          'reelsThisWeek': weekly['reels'] ?? a['reelsThisWeek'] ?? 0,
+          'recentFollowers': weekly['newFollowers'] ?? a['recentFollowers'] ?? 0,
+          'nearfoScore': a['nearfoScore'] ?? 0,
+        };
+        return ApiResponse.success(flat);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to get analytics');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// PUT /api/auth/update-profile
+  static Future<ApiResponse<UserModel>> updateProfile(Map<String, dynamic> fields) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$_baseUrl/auth/update-profile'),
+        headers: _headers,
+        body: jsonEncode(fields),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(UserModel.fromJson(data['user']));
+      }
+      return ApiResponse.error(data['message'] ?? 'Profile update failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/auth/update-location
+  static Future<ApiResponse<UserModel>> updateLocation({
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/auth/update-location'),
+        headers: _headers,
+        body: jsonEncode({
+          'latitude': latitude,
+          'longitude': longitude,
+        }),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(UserModel.fromJson(data['user']));
+      }
+      return ApiResponse.error(data['message'] ?? 'Location update failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== FEED / POSTS =====
+
+  /// GET /api/posts/feed — supports both page-based and cursor-based pagination
+  static Future<FeedResponse> getFeed({
+    String mode = 'mixed',
+    int page = 1,
+    int limit = 20,
+    String? cursor,
+  }) async {
+    try {
+      String url = '$_baseUrl/posts/feed?mode=$mode&limit=$limit';
+      if (cursor != null) {
+        url += '&cursor=$cursor';
+      } else {
+        url += '&page=$page';
+      }
+      final res = await http.get(Uri.parse(url), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true && data['posts'] is List) {
+        final posts = ((data['posts'] as List?) ?? [])
+            .map((p) => PostModel.fromJson(p))
+            .toList();
+        return FeedResponse(
+          posts: posts,
+          hasMore: data['hasMore'] ?? false,
+          nextCursor: data['nextCursor']?.toString(),
+        );
+      }
+      return FeedResponse(posts: [], hasMore: false, error: data['message'] ?? 'Failed to load feed');
+    } on TimeoutException {
+      return FeedResponse(posts: [], hasMore: false, error: 'Request timed out.');
+    } catch (e) {
+      return FeedResponse(posts: [], hasMore: false, error: 'Network error: $e');
+    }
+  }
+
+  /// Upload a single video to S3
+  static Future<ApiResponse<String>> uploadVideo(String filePath, {String folder = 'videos'}) async {
+    try {
+      final fileName = filePath.split('/').last;
+      final ext = filePath.split('.').last.toLowerCase();
+      final mimeType = _getMediaType(ext);
+      final contentType = '${mimeType.type}/${mimeType.subtype}';
+
+      // Step 1: Get presigned S3 URL from backend
+      final presignedUri = Uri.parse('$_baseUrl/upload/presigned?fileName=$fileName&fileType=$contentType&folder=$folder');
+      final presignedRes = await http.get(presignedUri, headers: _headers).timeout(_timeout);
+      final presignedData = jsonDecode(presignedRes.body);
+
+      if (presignedData['success'] != true) {
+        return ApiResponse.error(presignedData['message'] ?? 'Failed to get upload URL');
+      }
+
+      final presignedUrl = presignedData['presignedUrl'];
+      final publicUrl = presignedData['publicUrl'];
+
+      // Step 2: Upload video directly to S3 using presigned PUT URL
+      // Use longer timeout for video uploads (videos can be large, especially on mobile data)
+      final fileBytes = await File(filePath).readAsBytes();
+      final fileSizeMB = fileBytes.length / (1024 * 1024);
+      // Dynamic timeout: 120s base + 30s per MB (minimum 120s, max 600s)
+      final uploadTimeoutSecs = (120 + (fileSizeMB * 30)).clamp(120, 600).toInt();
+      debugPrint('[ApiService] Video upload: ${fileSizeMB.toStringAsFixed(1)}MB, timeout: ${uploadTimeoutSecs}s');
+      // Must include Cache-Control header to match presigned URL params
+      final isMedia = contentType.startsWith('image/') || contentType.startsWith('video/');
+      final cacheControl = 'public, max-age=${isMedia ? 31536000 : 2592000}, immutable';
+      final uploadRes = await http.put(
+        Uri.parse(presignedUrl),
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': cacheControl,
+        },
+        body: fileBytes,
+      ).timeout(Duration(seconds: uploadTimeoutSecs));
+
+      if (uploadRes.statusCode == 200) {
+        return ApiResponse.success(publicUrl);
+      }
+      return ApiResponse.error('Video upload to S3 failed (${uploadRes.statusCode})');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/posts
+  static Future<ApiResponse<PostModel>> createPost({
+    required String content,
+    List<String>? images,
+    String? video,
+    String? mood,
+    List<String>? hashtags,
+    String visibility = 'public',
+  }) async {
+    try {
+      final body = <String, dynamic>{
+        'content': content,
+        'images': images ?? [],
+        'mood': mood ?? '',
+        'hashtags': hashtags ?? [],
+        'visibility': visibility,
+      };
+      if (video != null && video.isNotEmpty) {
+        body['video'] = video;
+      }
+
+      final res = await http.post(
+        Uri.parse('$_baseUrl/posts'),
+        headers: _headers,
+        body: jsonEncode(body),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(PostModel.fromJson(data['post']));
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to create post');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/posts/:id/like (toggle)
+  static Future<ApiResponse<Map<String, dynamic>>> toggleLike(String postId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/posts/$postId/like'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({
+          'isLiked': data['isLiked'],
+          'likesCount': data['likesCount'],
+        });
+      }
+      return ApiResponse.error(data['message'] ?? 'Like failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// DELETE /api/posts/:id
+  static Future<ApiResponse<void>> deletePost(String postId) async {
+    try {
+      final res = await http.delete(
+        Uri.parse('$_baseUrl/posts/$postId'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(null);
+      }
+      return ApiResponse.error(data['message'] ?? 'Delete failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/posts/trending/hashtags
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getTrendingHashtags() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/posts/trending/hashtags'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true && data['trending'] is List) {
+        final trending = ((data['trending'] as List?) ?? [])
+            .map((t) => Map<String, dynamic>.from(t))
+            .toList();
+        return ApiResponse.success(trending);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load trending');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/posts/trending/posts — Get viral/trending posts
+  static Future<ApiResponse<List<PostModel>>> getTrendingPosts({
+    int page = 1,
+    int limit = 20,
+    String timeWindow = '24h',
+    String scope = 'all',
+  }) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/posts/trending/posts?page=$page&limit=$limit&timeWindow=$timeWindow&scope=$scope'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true && data['posts'] is List) {
+        final posts = ((data['posts'] as List?) ?? [])
+            .map((p) => PostModel.fromJson(p))
+            .toList();
+        return ApiResponse.success(posts, hasMore: data['hasMore'] ?? false);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load trending posts');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/posts/:id/view — Record a post view
+  static Future<ApiResponse<Map<String, dynamic>>> recordPostView(String postId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/posts/$postId/view'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(data);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to record view');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/posts/:id/share — Record a post share
+  static Future<ApiResponse<Map<String, dynamic>>> recordPostShare(String postId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/posts/$postId/share'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(data);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to record share');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== COMMENTS =====
+
+  /// GET /api/comments/:contentId — Get comments for a post or reel
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getComments(String contentId, {bool isReel = false}) async {
+    try {
+      final type = isReel ? 'reel' : 'post';
+      final res = await http.get(
+        Uri.parse('$_baseUrl/comments/$contentId?type=$type'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final comments = ((data['comments'] as List?) ?? [])
+            .map((c) => Map<String, dynamic>.from(c))
+            .toList();
+        return ApiResponse.success(comments);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load comments');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/comments — Add a comment to a post or reel
+  static Future<ApiResponse<Map<String, dynamic>>> addComment({
+    required String contentId,
+    required String content,
+    bool isReel = false,
+    String? parentComment,
+  }) async {
+    try {
+      final body = <String, dynamic>{
+        'content': content,
+        if (parentComment != null) 'parentComment': parentComment,
+      };
+      if (isReel) {
+        body['reelId'] = contentId;
+      } else {
+        body['postId'] = contentId;
+      }
+      final res = await http.post(
+        Uri.parse('$_baseUrl/comments'),
+        headers: _headers,
+        body: jsonEncode(body),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(Map<String, dynamic>.from(data['comment'] ?? {}));
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to add comment');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/comments/:id/like — Toggle like on a comment
+  static Future<ApiResponse<Map<String, dynamic>>> toggleCommentLike(String commentId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/comments/$commentId/like'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({
+          'isLiked': data['isLiked'],
+          'likesCount': data['likesCount'],
+        });
+      }
+      return ApiResponse.error(data['message'] ?? 'Like failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/comments/:contentId/replies/:commentId — Get replies for a comment
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getCommentReplies(String contentId, String commentId) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/comments/$contentId/replies/$commentId'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final replies = ((data['replies'] as List?) ?? [])
+            .map((r) => Map<String, dynamic>.from(r))
+            .toList();
+        return ApiResponse.success(replies);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load replies');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== CHAT =====
+
+  /// POST /api/chat — Create or get existing 1:1 chat
+  static Future<ApiResponse<Map<String, dynamic>>> createOrGetChat(String participantId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/chat'),
+        headers: _headers,
+        body: jsonEncode({'participantId': participantId}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(Map<String, dynamic>.from(data['chat']));
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to create chat');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/chat — Get all user's chats
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getChats({
+    int page = 1,
+    int limit = 20,
+  }) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/chat?page=$page&limit=$limit'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final chats = ((data['chats'] as List?) ?? [])
+            .map((c) => Map<String, dynamic>.from(c))
+            .toList();
+        return ApiResponse.success(chats);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load chats');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/chat/:chatId/messages
+  static Future<ApiResponse<Map<String, dynamic>>> getChatMessages(
+    String chatId, {
+    int page = 1,
+    int limit = 50,
+  }) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/chat/$chatId/messages?page=$page&limit=$limit'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({
+          'messages': ((data['messages'] as List?) ?? [])
+              .map((m) => Map<String, dynamic>.from(m))
+              .toList(),
+          'hasMore': data['hasMore'] ?? false,
+          'totalMessages': data['totalMessages'] ?? 0,
+        });
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load messages');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/chat/:chatId/messages — Send a message via REST
+  static Future<ApiResponse<Map<String, dynamic>>> sendMessage({
+    required String chatId,
+    required String content,
+    String type = 'text',
+    String? mediaUrl,
+    Map<String, dynamic>? replyTo,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/chat/$chatId/messages'),
+        headers: _headers,
+        body: jsonEncode({
+          'content': content,
+          'type': type,
+          if (mediaUrl != null) 'mediaUrl': mediaUrl,
+          if (replyTo != null) 'replyTo': replyTo,
+        }),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(Map<String, dynamic>.from(data['message']));
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to send message');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== MESSAGE REACTIONS =====
+
+  /// POST /api/chat/:chatId/messages/:messageId/react — Add emoji reaction to a message
+  static Future<ApiResponse> addReaction(String chatId, String messageId, String emoji) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/chat/$chatId/messages/$messageId/react'),
+        headers: _headers,
+        body: jsonEncode({'emoji': emoji}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200) {
+        return ApiResponse.success(data);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to add reaction');
+    } catch (e) {
+      return ApiResponse.error(e.toString());
+    }
+  }
+
+  /// DELETE /api/chat/:chatId/messages/:messageId/react — Remove emoji reaction from a message
+  static Future<ApiResponse> removeReaction(String chatId, String messageId) async {
+    try {
+      final res = await http.delete(
+        Uri.parse('$_baseUrl/chat/$chatId/messages/$messageId/react'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200) {
+        return ApiResponse.success(data);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to remove reaction');
+    } catch (e) {
+      return ApiResponse.error(e.toString());
+    }
+  }
+
+  // ===== NOTIFICATIONS =====
+
+  /// GET /api/notifications
+  static Future<ApiResponse<NotificationsResponse>> getNotifications({
+    int page = 1,
+    int limit = 30,
+  }) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/notifications?page=$page&limit=$limit'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final notifications = ((data['notifications'] as List?) ?? [])
+            .map((n) => NotificationModel.fromJson(n))
+            .toList();
+        return ApiResponse.success(NotificationsResponse(
+          notifications: notifications,
+          unreadCount: data['unreadCount'] ?? 0,
+          hasMore: data['hasMore'] ?? false,
+        ));
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load notifications');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/notifications/unread-count
+  static Future<ApiResponse<int>> getUnreadCount() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/notifications/unread-count'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(data['unreadCount'] ?? 0);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// PUT /api/notifications/read-all
+  static Future<ApiResponse<void>> markAllNotificationsRead() async {
+    try {
+      final res = await http.put(
+        Uri.parse('$_baseUrl/notifications/read-all'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// PUT /api/notifications/:id/read — Mark single notification as read
+  static Future<ApiResponse<void>> markNotificationRead(String notifId) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$_baseUrl/notifications/$notifId/read'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== UPLOAD =====
+
+  /// POST /api/upload/avatar — Upload profile avatar (multipart)
+  static Future<ApiResponse<String>> uploadAvatar(String filePath) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/upload/avatar');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['Authorization'] = 'Bearer ${_authToken ?? ''}';
+      request.files.add(await http.MultipartFile.fromPath(
+        'avatar',
+        filePath,
+        contentType: _getMediaType(filePath),
+      ));
+      final streamedResponse = await request.send();
+      final responseBody = await streamedResponse.stream.bytesToString();
+      final data = jsonDecode(responseBody);
+      if (data['success'] == true) {
+        return ApiResponse.success((data['url'] as String?) ?? '');
+      }
+      return ApiResponse.error(data['message'] ?? 'Upload failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Upload error: $e');
+    }
+  }
+
+  /// POST /api/upload/image — Upload single image (multipart)
+  static Future<ApiResponse<String>> uploadImage(String filePath, {String folder = 'images'}) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/upload/image?folder=$folder');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['Authorization'] = 'Bearer ${_authToken ?? ''}';
+      request.files.add(await http.MultipartFile.fromPath('image', filePath, contentType: _getMediaType(filePath)));
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 60));
+      final responseBody = await streamedResponse.stream.bytesToString();
+      final data = jsonDecode(responseBody);
+      if (data['success'] == true) {
+        return ApiResponse.success((data['url'] as String?) ?? '');
+      }
+      return ApiResponse.error(data['message'] ?? 'Upload failed');
+    } on TimeoutException {
+      return ApiResponse.error('Upload timed out. Check your internet and try again.');
+    } catch (e) {
+      return ApiResponse.error('Upload error: $e');
+    }
+  }
+
+  /// POST /api/upload/voice — Upload voice message (multipart)
+  static Future<ApiResponse<String>> uploadVoice(String filePath, {int duration = 0}) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/upload/voice');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['Authorization'] = 'Bearer ${_authToken ?? ''}';
+      request.fields['duration'] = duration.toString();
+      request.files.add(await http.MultipartFile.fromPath('voice', filePath, contentType: _getMediaType(filePath)));
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 60));
+      final responseBody = await streamedResponse.stream.bytesToString();
+      final data = jsonDecode(responseBody);
+      if (data['success'] == true) {
+        return ApiResponse.success((data['url'] as String?) ?? '');
+      }
+      return ApiResponse.error(data['message'] ?? 'Voice upload failed');
+    } on TimeoutException {
+      return ApiResponse.error('Upload timed out. Check your internet and try again.');
+    } catch (e) {
+      return ApiResponse.error('Upload error: $e');
+    }
+  }
+
+  /// POST /api/upload/images — Upload multiple images (multipart, max 5)
+  static Future<ApiResponse<List<String>>> uploadImages(List<String> filePaths, {String folder = 'posts'}) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/upload/images?folder=$folder');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['Authorization'] = 'Bearer ${_authToken ?? ''}';
+      for (final path in filePaths) {
+        request.files.add(await http.MultipartFile.fromPath('images', path, contentType: _getMediaType(path)));
+      }
+      final streamedResponse = await request.send();
+      final responseBody = await streamedResponse.stream.bytesToString();
+      final data = jsonDecode(responseBody);
+      if (data['success'] == true) {
+        final images = ((data['images'] as List?) ?? []).map((i) => (i['url'] as String?) ?? '').toList();
+        return ApiResponse.success(images);
+      }
+      return ApiResponse.error(data['message'] ?? 'Upload failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Upload error: $e');
+    }
+  }
+
+  // ===== SEARCH =====
+
+  /// GET /api/users/nearby — Get nearby users
+  static Future<ApiResponse<List<UserModel>>> searchNearbyUsers(String query) async {
+    try {
+      final url = query.isNotEmpty
+          ? '$_baseUrl/users/search/${Uri.encodeComponent(query)}'
+          : '$_baseUrl/users/nearby?limit=50';
+      final res = await http.get(
+        Uri.parse(url),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true && data['users'] is List) {
+        final users = ((data['users'] as List?) ?? [])
+            .map((u) => UserModel.fromJson(u))
+            .toList();
+        return ApiResponse.success(users);
+      }
+      return ApiResponse.error(data['message'] ?? 'Search failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/users/search/:query — Search users by name or handle
+  static Future<ApiResponse<List<Map<String, dynamic>>>> searchUsers(String query) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/users/search/${Uri.encodeComponent(query)}'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true && data['users'] is List) {
+        final users = ((data['users'] as List?) ?? [])
+            .map((u) => Map<String, dynamic>.from(u))
+            .toList();
+        return ApiResponse.success(users);
+      }
+      return ApiResponse.error(data['message'] ?? 'Search failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/users/suggested — Suggested friends (respects feedPreference / 200km radius)
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getSuggestedFriends({int page = 1, int limit = 30, String? mode}) async {
+    try {
+      final modeParam = mode != null ? '&mode=$mode' : '';
+      final res = await http.get(
+        Uri.parse('$_baseUrl/users/suggested?limit=$limit$modeParam'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true && data['suggestions'] is List) {
+        final users = ((data['suggestions'] as List?) ?? [])
+            .map((u) => Map<String, dynamic>.from(u))
+            .toList();
+        return ApiResponse.success(users);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load suggestions');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/users/my-circle — Mutual followers
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getMyCircle() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/users/my-circle'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if ((data['success'] == true || data['circle'] != null) && data['circle'] is List) {
+        final circle = ((data['circle'] as List?) ?? []).map((u) {
+          final m = Map<String, dynamic>.from(u);
+          // Backend may return 'distance' instead of 'distanceKm'
+          if (m['distanceKm'] == null && m['distance'] != null) {
+            m['distanceKm'] = m['distance'];
+          }
+          return m;
+        }).toList();
+        return ApiResponse.success(circle);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to get circle');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== REELS =====
+
+  /// GET /api/reels/feed — Infinite scroll Reels feed
+  static Future<ApiResponse<List<ReelModel>>> getReelsFeed({
+    String mode = 'mixed',
+    int page = 1,
+    int limit = 10,
+  }) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/reels/feed?mode=$mode&page=$page&limit=$limit'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final reels = ((data['reels'] as List?) ?? [])
+            .map((r) => ReelModel.fromJson(r))
+            .toList();
+        return ApiResponse.success(reels, hasMore: data['hasMore'] ?? false);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load reels');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/reels — Create a new Reel
+  static Future<ApiResponse<ReelModel>> createReel({
+    required String videoUrl,
+    String? thumbnailUrl,
+    String caption = '',
+    String audioName = 'Original Audio',
+    int duration = 0,
+    String visibility = 'public',
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/reels'),
+        headers: _headers,
+        body: jsonEncode({
+          'videoUrl': videoUrl,
+          'thumbnailUrl': thumbnailUrl ?? '',
+          'caption': caption,
+          'audioName': audioName,
+          'duration': duration,
+          'visibility': visibility,
+        }),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(ReelModel.fromJson(data['reel']));
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to create reel');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/reels/:id/like — Toggle like on a reel
+  static Future<ApiResponse<Map<String, dynamic>>> toggleReelLike(String reelId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/reels/$reelId/like'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({
+          'isLiked': data['isLiked'],
+          'likesCount': data['likesCount'],
+        });
+      }
+      return ApiResponse.error(data['message'] ?? 'Like failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/reels/:id/view — Increment view count
+  static Future<ApiResponse<int>> recordReelView(String reelId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/reels/$reelId/view'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(data['viewsCount'] ?? 0);
+      }
+      return ApiResponse.error(data['message'] ?? 'View tracking failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/reels/:id/bookmark — Toggle bookmark on a reel
+  static Future<ApiResponse<bool>> toggleReelBookmark(String reelId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/reels/$reelId/bookmark'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(data['isBookmarked'] ?? false);
+      }
+      return ApiResponse.error(data['message'] ?? 'Bookmark failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// DELETE /api/reels/:id — Delete a reel
+  static Future<ApiResponse<void>> deleteReel(String reelId) async {
+    try {
+      final res = await http.delete(
+        Uri.parse('$_baseUrl/reels/$reelId'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Delete failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/reels/user/:userId — Get reels by user
+  static Future<ApiResponse<List<ReelModel>>> getUserReels(String userId, {int page = 1}) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/reels/user/$userId?page=$page&limit=20'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final reels = ((data['reels'] as List?) ?? [])
+            .map((r) => ReelModel.fromJson(r))
+            .toList();
+        return ApiResponse.success(reels, hasMore: data['hasMore'] ?? false);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load reels');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/posts/:id/bookmark — Toggle bookmark on a post
+  static Future<ApiResponse<bool>> togglePostBookmark(String postId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/posts/$postId/bookmark'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(data['isBookmarked'] ?? false);
+      }
+      return ApiResponse.error(data['message'] ?? 'Bookmark failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/posts/saved/list — Get user's bookmarked posts
+  static Future<ApiResponse<List<PostModel>>> getSavedPosts({int page = 1}) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/posts/saved/list?page=$page&limit=20'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if ((data['success'] == true || data['posts'] != null) && data['posts'] is List) {
+        final posts = ((data['posts'] as List?) ?? [])
+            .map((p) => PostModel.fromJson(p))
+            .toList();
+        final hasMore = data['hasMore'] ?? (data['pages'] != null ? page < data['pages'] : false);
+        return ApiResponse.success(posts, hasMore: hasMore);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load saved posts');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/reels/saved/list — Get user's bookmarked reels
+  static Future<ApiResponse<List<ReelModel>>> getSavedReels({int page = 1}) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/reels/saved/list?page=$page&limit=20'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if ((data['success'] == true || data['reels'] != null) && data['reels'] is List) {
+        final reels = ((data['reels'] as List?) ?? [])
+            .map((r) => ReelModel.fromJson(r))
+            .toList();
+        final hasMore = data['hasMore'] ?? (data['pages'] != null ? page < data['pages'] : false);
+        return ApiResponse.success(reels, hasMore: hasMore);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load saved reels');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== USER PROFILE & FOLLOW =====
+
+  /// GET /api/users/:handle — Get another user's public profile
+  static Future<ApiResponse<Map<String, dynamic>>> getUserProfile(String handle) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/users/$handle'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(Map<String, dynamic>.from(data['user']));
+      }
+      return ApiResponse.error(data['message'] ?? 'User not found');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/users/id/:userId — Get user profile by MongoDB _id
+  static Future<ApiResponse<Map<String, dynamic>>> getUserProfileById(String userId) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/users/id/$userId'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success(Map<String, dynamic>.from(data['user']));
+      }
+      return ApiResponse.error(data['message'] ?? 'User not found');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// POST /api/users/:id/follow — Toggle follow/unfollow
+  static Future<ApiResponse<Map<String, dynamic>>> toggleFollow(String userId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/users/$userId/follow'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({
+          'isFollowing': data['isFollowing'],
+          'followersCount': data['followersCount'],
+          'followingCount': data['followingCount'],
+        });
+      }
+      return ApiResponse.error(data['message'] ?? 'Follow failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/users/:id/followers — Get followers list
+  static Future<ApiResponse<Map<String, dynamic>>> getFollowers(String userId, {int page = 1}) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/users/$userId/followers?page=$page&limit=30'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({
+          'users': ((data['followers'] as List?) ?? []).map((u) => Map<String, dynamic>.from(u)).toList(),
+          'total': data['totalFollowers'] ?? 0,
+          'hasMore': data['hasMore'] ?? false,
+        });
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load followers');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/users/:id/following — Get following list
+  static Future<ApiResponse<Map<String, dynamic>>> getFollowing(String userId, {int page = 1}) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/users/$userId/following?page=$page&limit=30'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({
+          'users': ((data['following'] as List?) ?? []).map((u) => Map<String, dynamic>.from(u)).toList(),
+          'total': data['totalFollowing'] ?? 0,
+          'hasMore': data['hasMore'] ?? false,
+        });
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load following');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/posts/user/:userId — Get posts by a specific user
+  static Future<ApiResponse<List<PostModel>>> getUserPosts(String userId, {int page = 1}) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/posts/user/$userId?page=$page&limit=20'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final posts = ((data['posts'] as List?) ?? [])
+            .map((p) => PostModel.fromJson(p))
+            .toList();
+        return ApiResponse.success(posts, hasMore: data['hasMore'] ?? false);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load user posts');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== BLOCK USER =====
+
+  /// POST /api/users/:id/block — Toggle block/unblock
+  static Future<ApiResponse<Map<String, dynamic>>> toggleBlock(String userId, {String reason = ''}) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/users/$userId/block'),
+        headers: _headers,
+        body: jsonEncode({'reason': reason}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({'isBlocked': data['isBlocked']});
+      }
+      return ApiResponse.error(data['message'] ?? 'Block failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/users/blocked/list — Get blocked users list
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getBlockedUsers() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/users/blocked/list'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final users = ((data['blockedUsers'] as List?) ?? [])
+            .map((u) => Map<String, dynamic>.from(u))
+            .toList();
+        return ApiResponse.success(users);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to load blocked users');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== CHAT RESTRICTION =====
+
+  /// POST /api/chat/:chatId/restrict — Toggle restrict a user in chat (silent)
+  static Future<ApiResponse<Map<String, dynamic>>> toggleChatRestriction({
+    required String chatId,
+    required String userId,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/chat/$chatId/restrict'),
+        headers: _headers,
+        body: jsonEncode({'userId': userId}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({'isRestricted': data['isRestricted']});
+      }
+      return ApiResponse.error(data['message'] ?? 'Restriction failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  /// GET /api/chat/:chatId/restriction-status
+  static Future<ApiResponse<List<String>>> getChatRestrictionStatus(String chatId) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/chat/$chatId/restriction-status'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final ids = ((data['restrictedUserIds'] as List?) ?? []).map((id) => id.toString()).toList();
+        return ApiResponse.success(ids);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to get restriction status');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) {
+      return ApiResponse.error('Network error: $e');
+    }
+  }
+
+  // ===== STORIES =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> createStory({
+    required String mediaUrl, String mediaType = 'image', String caption = '', int duration = 5,
+  }) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/stories'), headers: _headers,
+        body: jsonEncode({'mediaUrl': mediaUrl, 'mediaType': mediaType, 'caption': caption, 'duration': duration})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['story']));
+      return ApiResponse.error(data['message'] ?? 'Failed to create story');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getStoryFeed() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/stories/feed'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        // Backend returns 'storyGroups', support both keys for compatibility
+        final feed = (data['storyGroups'] as List?) ?? (data['storyFeed'] as List?) ?? [];
+        return ApiResponse.success(feed.map((s) => Map<String, dynamic>.from(s)).toList());
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<int>> viewStory(String storyId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/stories/$storyId/view'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(data['viewsCount'] ?? 0);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<Map<String, dynamic>>> toggleStoryLike(String storyId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/stories/$storyId/like'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success({'isLiked': data['isLiked'], 'likesCount': data['likesCount']});
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> deleteStory(String storyId) async {
+    try {
+      final res = await http.delete(Uri.parse('$_baseUrl/stories/$storyId'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getStoryViewers(String storyId) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/stories/$storyId/viewers'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(((data['viewers'] as List?) ?? []).map((v) => Map<String, dynamic>.from(v)).toList());
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== STORY HIGHLIGHTS =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> createHighlight({
+    required String title, List<String>? storyIds, String? coverUrl,
+  }) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/stories/highlights'), headers: _headers,
+        body: jsonEncode({'title': title, 'storyIds': storyIds ?? [], 'coverUrl': coverUrl ?? ''})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['highlight']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getHighlights(String userId) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/stories/highlights/$userId'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final list = (data['highlights'] as List?) ?? [];
+        return ApiResponse.success(list.map((h) => Map<String, dynamic>.from(h)).toList());
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> updateHighlight(String id, {String? title, List<String>? storyIds, String? coverUrl}) async {
+    try {
+      final body = <String, dynamic>{};
+      if (title != null) body['title'] = title;
+      if (storyIds != null) body['storyIds'] = storyIds;
+      if (coverUrl != null) body['coverUrl'] = coverUrl;
+      final res = await http.put(Uri.parse('$_baseUrl/stories/highlights/$id'), headers: _headers,
+        body: jsonEncode(body)).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> deleteHighlight(String id) async {
+    try {
+      final res = await http.delete(Uri.parse('$_baseUrl/stories/highlights/$id'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> addStoryToHighlight(String highlightId, String storyId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/stories/highlights/$highlightId/add'), headers: _headers,
+        body: jsonEncode({'storyId': storyId})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== SUGGESTED USERS (EXPLORE/DISCOVER) =====
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getSuggestedUsers({int limit = 20}) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/users/suggested?limit=$limit'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final list = (data['suggestions'] as List?) ?? [];
+        return ApiResponse.success(list.map((s) => Map<String, dynamic>.from(s)).toList());
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== POST EDIT =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> editPost(String postId, {String? content, String? mood, String? visibility}) async {
+    try {
+      final body = <String, dynamic>{};
+      if (content != null) body['content'] = content;
+      if (mood != null) body['mood'] = mood;
+      if (visibility != null) body['visibility'] = visibility;
+      final res = await http.put(Uri.parse('$_baseUrl/posts/$postId'), headers: _headers,
+        body: jsonEncode(body)).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['post']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== ONLINE STATUS =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> getOnlineStatus(List<String> userIds) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/users/online-status'), headers: _headers,
+        body: jsonEncode({'userIds': userIds})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['statuses'] ?? {}));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== LIVE STREAMING =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> startLiveStream({String title = 'Live', String? description}) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/live/start'), headers: _headers,
+        body: jsonEncode({'title': title, 'description': description ?? ''})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['stream']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> endLiveStream(String streamId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/live/$streamId/end'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getActiveLiveStreams() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/live/active'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final list = (data['streams'] as List?) ?? [];
+        return ApiResponse.success(list.map((s) => Map<String, dynamic>.from(s)).toList());
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> joinLiveStream(String streamId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/live/$streamId/join'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> sendLiveComment(String streamId, String text) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/live/$streamId/comment'), headers: _headers,
+        body: jsonEncode({'text': text})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== HASHTAG PAGES =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> getHashtagFeed(String tag, {int page = 1, String sort = 'recent'}) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/posts/hashtag/$tag?page=$page&sort=$sort'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== REPOST TO STORY =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> repostToStory(String postId, {String? caption}) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/stories/repost'), headers: _headers,
+        body: jsonEncode({'postId': postId, 'caption': caption ?? ''})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['story']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== COLLECTIONS =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> createCollection({required String name, String? description, bool isPrivate = true}) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/collections'), headers: _headers,
+        body: jsonEncode({'name': name, 'description': description ?? '', 'isPrivate': isPrivate})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['collection']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getCollections() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/collections'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final list = (data['collections'] as List?) ?? [];
+        return ApiResponse.success(list.map((c) => Map<String, dynamic>.from(c)).toList());
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<Map<String, dynamic>>> getCollection(String id) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/collections/$id'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['collection']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<dynamic>>> getCollectionPosts(String collectionId) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/collections/$collectionId/posts'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['success'] == true) {
+        final posts = data['posts'] as List? ?? [];
+        return ApiResponse.success(posts);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> addToCollection(String collectionId, String postId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/collections/$collectionId/add'), headers: _headers,
+        body: jsonEncode({'postId': postId})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> removeFromCollection(String collectionId, String postId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/collections/$collectionId/remove'), headers: _headers,
+        body: jsonEncode({'postId': postId})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> deleteCollection(String id) async {
+    try {
+      final res = await http.delete(Uri.parse('$_baseUrl/collections/$id'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== CHAT SEARCH =====
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> searchChatMessages(String query, {String? chatId}) async {
+    try {
+      final params = 'q=${Uri.encodeComponent(query)}${chatId != null ? '&chatId=$chatId' : ''}';
+      final res = await http.get(Uri.parse('$_baseUrl/chat/search?$params'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final list = (data['messages'] as List?) ?? [];
+        return ApiResponse.success(list.map((m) => Map<String, dynamic>.from(m)).toList());
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== DMCA TAKEDOWN =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> submitTakedown({
+    required String complainantName, required String complainantEmail, required String contentType,
+    required String contentId, required String description, String? originalWorkUrl, bool swornStatement = false,
+  }) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/takedown'), headers: _headers,
+        body: jsonEncode({
+          'complainantName': complainantName, 'complainantEmail': complainantEmail,
+          'contentType': contentType, 'contentId': contentId, 'description': description,
+          'originalWorkUrl': originalWorkUrl ?? '', 'swornStatement': swornStatement,
+        })).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getTakedowns({String status = 'pending'}) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/takedown?status=$status'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final list = (data['takedowns'] as List?) ?? [];
+        return ApiResponse.success(list.map((t) => Map<String, dynamic>.from(t)).toList());
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> reviewTakedown(String id, {required String action, String? notes}) async {
+    try {
+      final res = await http.put(Uri.parse('$_baseUrl/takedown/$id/review'), headers: _headers,
+        body: jsonEncode({'action': action, 'notes': notes ?? ''})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== MODERATION (ADMIN) =====
+
+  static Future<ApiResponse<void>> banUser(String userId, {String? reason}) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/moderation/ban'), headers: _headers,
+        body: jsonEncode({'userId': userId, 'reason': reason ?? ''})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> unbanUser(String userId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/moderation/unban'), headers: _headers,
+        body: jsonEncode({'userId': userId})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> suspendUser(String userId, {int hours = 168, String? reason}) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/moderation/suspend'), headers: _headers,
+        body: jsonEncode({'userId': userId, 'durationHours': hours, 'reason': reason ?? ''})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getBannedUsers() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/moderation/banned'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final list = (data['users'] as List?) ?? [];
+        return ApiResponse.success(list.map((u) => Map<String, dynamic>.from(u)).toList());
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> hidePost(String postId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/moderation/hide-post'), headers: _headers,
+        body: jsonEncode({'postId': postId})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== NEARFO SCORE =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> getNearfoScore() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/users/nearfo-score'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data));
+      return ApiResponse.error(data['message'] ?? 'Failed to load score');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== REPORTS =====
+
+  static Future<ApiResponse<void>> reportContent({
+    required String contentType, required String contentId, required String reason, String description = '',
+  }) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/reports'), headers: _headers,
+        body: jsonEncode({'contentType': contentType, 'contentId': contentId, 'reason': reason, 'description': description})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Report failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== MESSAGE REQUESTS =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> sendMessageRequest({required String recipientId, String message = ''}) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/message-requests'), headers: _headers,
+        body: jsonEncode({'recipientId': recipientId, 'message': message})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['request']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getIncomingMessageRequests() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/message-requests/incoming'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(((data['requests'] as List?) ?? []).map((r) => Map<String, dynamic>.from(r)).toList());
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<Map<String, dynamic>>> acceptMessageRequest(String requestId) async {
+    try {
+      final res = await http.put(Uri.parse('$_baseUrl/message-requests/$requestId/accept'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['chat']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> declineMessageRequest(String requestId) async {
+    try {
+      final res = await http.put(Uri.parse('$_baseUrl/message-requests/$requestId/decline'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<int>> getMessageRequestCount() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/message-requests/count'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(data['count'] ?? 0);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== GROUP CHAT =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> createGroupChat({
+    required List<String> participantIds, required String groupName, String groupDescription = '',
+  }) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/chat/group'), headers: _headers,
+        body: jsonEncode({'participantIds': participantIds, 'groupName': groupName, 'groupDescription': groupDescription})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['chat']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<Map<String, dynamic>>> updateGroupChat({
+    required String chatId, String? groupName, String? groupDescription, String? groupAvatar,
+  }) async {
+    try {
+      final body = <String, dynamic>{};
+      if (groupName != null) body['groupName'] = groupName;
+      if (groupDescription != null) body['groupDescription'] = groupDescription;
+      if (groupAvatar != null) body['groupAvatar'] = groupAvatar;
+      final res = await http.put(Uri.parse('$_baseUrl/chat/group/$chatId'), headers: _headers, body: jsonEncode(body)).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['chat']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> addGroupMembers({required String chatId, required List<String> userIds}) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/chat/group/$chatId/add'), headers: _headers, body: jsonEncode({'userIds': userIds})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> removeGroupMember({required String chatId, required String userId}) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/chat/group/$chatId/remove'), headers: _headers, body: jsonEncode({'userId': userId})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> leaveGroup(String chatId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/chat/group/$chatId/leave'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== CHAT SETTINGS & PREMIUM =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> getChatSettings(String chatId) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/chat/$chatId/settings'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['settings'] ?? data));
+      return ApiResponse.error(data['message'] ?? 'Failed to load settings');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> updateChatSettings({
+    required String chatId,
+    required Map<String, dynamic> settings,
+  }) async {
+    try {
+      final res = await http.put(Uri.parse('$_baseUrl/chat/$chatId/settings'), headers: _headers, body: jsonEncode(settings)).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed to update settings');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getChatMedia(String chatId) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/chat/$chatId/media'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success((data['media'] as List?)?.map((m) => Map<String, dynamic>.from(m)).toList() ?? []);
+      return ApiResponse.error(data['message'] ?? 'Failed to load media');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  /// PUT /api/chat/:chatId/messages/:messageId/edit — Edit a text message
+  static Future<ApiResponse<Map<String, dynamic>>> editMessage({
+    required String chatId,
+    required String messageId,
+    required String content,
+  }) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$_baseUrl/chat/$chatId/messages/$messageId/edit'),
+        headers: _headers,
+        body: jsonEncode({'content': content}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['data'] ?? {}));
+      return ApiResponse.error(data['message'] ?? 'Failed to edit message');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> unsendMessage({required String chatId, required String messageId}) async {
+    try {
+      final res = await http.delete(Uri.parse('$_baseUrl/chat/$chatId/messages/$messageId/unsend'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed to unsend message');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> deleteMessage({required String chatId, required String messageId}) async {
+    try {
+      final res = await http.delete(Uri.parse('$_baseUrl/chat/$chatId/messages/$messageId'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed to delete message');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> deleteChat(String chatId) async {
+    try {
+      final res = await http.delete(Uri.parse('$_baseUrl/chat/$chatId'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed to delete chat');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> toggleBlockUser(String userId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/chat/block/$userId'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== ADMIN =====
+
+  static Future<ApiResponse<Map<String, dynamic>>> getAdminDashboard() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/admin/dashboard'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data['dashboard']));
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getAdminUsers({int page = 1, String search = ''}) async {
+    try {
+      final q = search.isNotEmpty ? '&search=${Uri.encodeComponent(search)}' : '';
+      final res = await http.get(Uri.parse('$_baseUrl/admin/users?page=$page&limit=30$q'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(((data['users'] as List?) ?? []).map((u) => Map<String, dynamic>.from(u)).toList());
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> updateAdminUser(String userId, Map<String, dynamic> fields) async {
+    try {
+      final res = await http.put(Uri.parse('$_baseUrl/admin/users/$userId'), headers: _headers, body: jsonEncode(fields)).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<Map<String, dynamic>>> getFlaggedContent() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/admin/content/flagged'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success({'flaggedPosts': data['flaggedPosts'] ?? [], 'flaggedReels': data['flaggedReels'] ?? []});
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getReports({String status = 'pending', int page = 1}) async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/reports?status=$status&page=$page'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(((data['reports'] as List?) ?? []).map((r) => Map<String, dynamic>.from(r)).toList());
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  static Future<ApiResponse<void>> reviewReport(String reportId, {required String status, String actionTaken = ''}) async {
+    try {
+      final res = await http.put(Uri.parse('$_baseUrl/reports/$reportId/review'), headers: _headers,
+        body: jsonEncode({'status': status, 'actionTaken': actionTaken})).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
+  // ===== HEALTH CHECK =====
+
+  static Future<bool> healthCheck() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/health')).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      return data['success'] == true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ===== FCM TOKEN =====
+
+  static Future<ApiResponse<void>> registerFcmToken(String fcmToken) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/auth/fcm-token'),
+        headers: _headers,
+        body: jsonEncode({'fcmToken': fcmToken}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(null);
+      return ApiResponse.error(data['message'] ?? 'FCM token failed');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  // ===== DIGITAL AVATAR =====
+
+  static Future<ApiResponse<List<dynamic>>> getAvatarStyles() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/avatar/styles'), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success((data['styles'] as List?) ?? []);
+      return ApiResponse.error(data['message'] ?? 'Failed to get styles');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  static Future<ApiResponse<Map<String, dynamic>>> generateAvatarVariations({
+    required String style,
+    int count = 12,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/avatar/generate-variations'),
+        headers: _headers,
+        body: jsonEncode({'style': style, 'count': count}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return ApiResponse.success({
+          'style': data['style'],
+          'variations': data['variations'],
+        });
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to generate variations');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  static Future<ApiResponse<String>> setAvatarAsProfile({
+    required String style,
+    required String seed,
+    Map<String, dynamic>? options,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/avatar/set-profile'),
+        headers: _headers,
+        body: jsonEncode({
+          'style': style,
+          'seed': seed,
+          if (options != null) 'options': options,
+        }),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(data['url']);
+      return ApiResponse.error(data['message'] ?? 'Failed to set avatar');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  static Future<ApiResponse<String>> generateAvatar({
+    required String style,
+    required String seed,
+    Map<String, dynamic>? options,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/avatar/generate'),
+        headers: _headers,
+        body: jsonEncode({
+          'style': style,
+          'seed': seed,
+          if (options != null) 'options': options,
+        }),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(data['url']);
+      return ApiResponse.error(data['message'] ?? 'Failed to generate avatar');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out. Please try again.');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  // ===== BOSS COMMAND CENTER =====
+
+  /// Submit an order to AI agents
+  static Future<ApiResponse<Map<String, dynamic>>> submitBossOrder({
+    required String order,
+    required List<String> agents,
+    String? quickCommand,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/boss/order'),
+        headers: _headers,
+        body: jsonEncode({
+          'order': order,
+          'agents': agents,
+          if (quickCommand != null) 'quickCommand': quickCommand,
+        }),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(data['data'] as Map<String, dynamic>? ?? {});
+      return ApiResponse.error(data['message'] ?? 'Failed to submit order');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  /// Execute a quick command
+  static Future<ApiResponse<Map<String, dynamic>>> executeQuickCommand(String command) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/boss/quick-command'),
+        headers: _headers,
+        body: jsonEncode({'command': command}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(data['data'] as Map<String, dynamic>? ?? {});
+      return ApiResponse.error(data['message'] ?? 'Failed to execute command');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  /// Get boss orders list
+  static Future<ApiResponse<List<dynamic>>> getBossOrders({int page = 1, String? status}) async {
+    try {
+      String url = '$_baseUrl/boss/orders?page=$page&limit=20';
+      if (status != null) url += '&status=$status';
+      final res = await http.get(Uri.parse(url), headers: _headers).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success((data['data'] as List?) ?? []);
+      return ApiResponse.error(data['message'] ?? 'Failed to load orders');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  /// Get single order detail with agent steps
+  static Future<ApiResponse<Map<String, dynamic>>> getBossOrderDetail(String orderId) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/boss/orders/$orderId'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 60));
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(data['data'] as Map<String, dynamic>? ?? {});
+      return ApiResponse.error(data['message'] ?? 'Failed to load order detail');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  /// Get boss dashboard stats
+  static Future<ApiResponse<Map<String, dynamic>>> getBossDashboard() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/boss/dashboard'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(data['data'] as Map<String, dynamic>? ?? {});
+      return ApiResponse.error(data['message'] ?? 'Failed to load dashboard');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  /// Get all agents info
+  static Future<ApiResponse<List<dynamic>>> getBossAgents() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/boss/agents'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success((data['data'] as List?) ?? []);
+      return ApiResponse.error(data['message'] ?? 'Failed to load agents');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  /// Cancel an order
+  static Future<ApiResponse<Map<String, dynamic>>> cancelBossOrder(String orderId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/boss/orders/$orderId/cancel'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) return ApiResponse.success(data['data'] as Map<String, dynamic>? ?? {});
+      return ApiResponse.error(data['message'] ?? 'Failed to cancel order');
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out');
+    } catch (e) { return ApiResponse.error(e.toString()); }
+  }
+
+  // ===== CALL HISTORY =====
+
+  /// GET /api/calls — Get call history
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getCallHistory({int page = 1}) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/calls?page=$page&limit=30'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['success'] == true) {
+        final calls = (data['calls'] as List?)?.map((c) => Map<String, dynamic>.from(c)).toList() ?? [];
+        return ApiResponse.success(calls, hasMore: data['hasMore'] ?? false);
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to get call history');
+    } catch (e) {
+      return ApiResponse.error(e.toString());
+    }
+  }
+
+  /// POST /api/calls — Log a call
+  static Future<ApiResponse<Map<String, dynamic>>> logCall({
+    required String receiverId,
+    String type = 'audio',
+    String status = 'missed',
+    int duration = 0,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/calls'),
+        headers: _headers,
+        body: jsonEncode({
+          'receiverId': receiverId,
+          'type': type,
+          'status': status,
+          'duration': duration,
+        }),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['success'] == true) {
+        return ApiResponse.success(Map<String, dynamic>.from(data['callLog'] ?? {}));
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to log call');
+    } catch (e) {
+      return ApiResponse.error(e.toString());
+    }
+  }
+
+  // ===== GROUP CHAT =====
+
+  /// GET /api/chat/group/:chatId — Get group info
+  static Future<ApiResponse<Map<String, dynamic>>> getGroupInfo(String chatId) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_baseUrl/chat/group/$chatId'),
+        headers: _headers,
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['success'] == true) {
+        return ApiResponse.success(Map<String, dynamic>.from(data['group'] ?? {}));
+      }
+      return ApiResponse.error(data['message'] ?? 'Failed to get group info');
+    } catch (e) {
+      return ApiResponse.error(e.toString());
+    }
+  }
+
+  /// PUT /api/chat/group/:chatId/add — Add member to group
+  static Future<ApiResponse> addGroupMember(String chatId, String userId) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$_baseUrl/chat/group/$chatId/add'),
+        headers: _headers,
+        body: jsonEncode({'userId': userId}),
+      ).timeout(_timeout);
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200) return ApiResponse.success(data);
+      return ApiResponse.error(data['message'] ?? 'Failed');
+    } catch (e) {
+      return ApiResponse.error(e.toString());
+    }
+  }
+
+}
+
+// ===== RESPONSE WRAPPER =====
+
+class ApiResponse<T> {
+  final T? data;
+  final String? errorMessage;
+  final bool isSuccess;
+  final bool isNewUser;
+  final bool hasMore;
+
+  ApiResponse._({
+    this.data,
+    this.errorMessage,
+    required this.isSuccess,
+    this.isNewUser = false,
+    this.hasMore = false,
+  });
+
+  factory ApiResponse.success(T data, {bool isNewUser = false, bool hasMore = false}) {
+    return ApiResponse._(data: data, isSuccess: true, isNewUser: isNewUser, hasMore: hasMore);
+  }
+
+  factory ApiResponse.error(String message) {
+    return ApiResponse._(errorMessage: message, isSuccess: false);
+  }
+}
+
+class FeedResponse {
+  final List<PostModel> posts;
+  final bool hasMore;
+  final String? nextCursor;
+  final String? error;
+
+  FeedResponse({required this.posts, required this.hasMore, this.nextCursor, this.error});
+
+  bool get isSuccess => error == null;
+}
+
+class NotificationsResponse {
+  final List<NotificationModel> notifications;
+  final int unreadCount;
+  final bool hasMore;
+
+  NotificationsResponse({
+    required this.notifications,
+    required this.unreadCount,
+    required this.hasMore,
+  });
+}

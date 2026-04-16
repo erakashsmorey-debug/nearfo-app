@@ -1,0 +1,101 @@
+name: nearfo_app
+description: Know Your Circle - Location-first social platform
+publish_to: 'none'
+version: 2.0.0+7
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # Firebase (phone + Google auth — backend handles all data)
+  firebase_core: ^3.8.0
+  firebase_auth: ^5.3.0
+  firebase_messaging: ^15.1.0
+  google_sign_in: ^6.2.1
+
+  # Location & Maps (ALL FREE - OpenStreetMap + Nominatim)
+  geolocator: ^11.0.0
+  flutter_map: ^6.1.0        # OpenStreetMap tiles (FREE, no API key)
+  latlong2: ^0.9.0            # Lat/Long utilities for flutter_map
+  permission_handler: ^11.3.0 # Runtime permissions
+
+  # State Management
+  provider: ^6.1.1
+
+  # UI
+  flutter_svg: ^2.0.9
+  cached_network_image: ^3.3.1
+  shimmer: ^3.0.0
+  flutter_animate: ^4.3.0
+  google_fonts: ^6.1.0
+
+  # Local Notifications (required to create Android notification channel)
+  flutter_local_notifications: ^17.0.0
+
+  # Chat
+  socket_io_client: ^2.0.3+1
+
+  # WebRTC Calling
+  flutter_webrtc: ^0.12.4
+
+  # Native Call Screen (like phone calls - works when app is killed)
+  flutter_callkit_incoming: ^3.0.0
+  uuid: ^4.3.3
+
+  # Image Compression
+  flutter_image_compress: ^2.1.0
+  path_provider: ^2.1.2
+
+  # Secure Storage (encrypted keychain/keystore for tokens)
+  flutter_secure_storage: ^9.0.0
+
+  # Utils
+  shared_preferences: ^2.2.2
+  image_picker: ^1.0.7
+  url_launcher: ^6.2.4
+
+  # Audio Recording & Playback
+  audio_waveforms: ^1.1.0  # Audio recording with waveform visualization
+  audioplayers: ^6.1.0
+
+  # Video
+  video_player: ^2.8.2
+  chewie: ^1.7.4
+  video_compress: ^3.1.2
+
+  # Sharing
+  share_plus: ^7.2.1
+
+  # HTTP
+  http: ^1.2.0
+  http_parser: ^4.0.0
+  dio: ^5.4.1
+
+  # Ads (Google AdMob)
+  google_mobile_ads: ^5.3.0
+
+  # Screenshot Detection in Chat
+  screenshot_callback: ^3.0.1
+
+dependency_overrides:
+  flutter_webrtc:
+    git:
+      url: https://github.com/flutter-webrtc/flutter-webrtc.git
+      ref: main
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  generate: true
+  uses-material-design: true
+
+  assets:
+    - assets/

@@ -1,0 +1,41 @@
+buildscript {
+            ext.kotlin_version = '2.1.0'
+            repositories {
+                            google()
+                            mavenCentral()
+            }
+            dependencies {
+                            classpath 'com.android.tools.build:gradle:8.9.1'
+                            classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+                            classpath 'com.google.gms:google-services:4.4.1'
+            }
+}
+
+allprojects {
+            repositories {
+                            google()
+                            mavenCentral()
+            }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+            project.buildDir = "${rootProject.buildDir}/${project.name}"
+            project.evaluationDependsOn(':app')
+
+            // Provide flutter SDK version properties for plugin subprojects
+            // geolocator_android etc. reference flutter.compileSdkVersion
+            if (project.name != 'app') {
+                            project.ext.set('flutter', [
+                                                compileSdkVersion: 36,
+                                                targetSdkVersion: 34,
+                                                minSdkVersion: 23,
+                                                versionCode: 1,
+                                                versionName: '1.0.0'
+                                            ])
+            }
+}
+
+tasks.register("clean", Delete) {
+            delete rootProject.buildDir
+}

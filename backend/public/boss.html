@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Boss Command Center — Nearfo</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0A0A10; color: #E5E7EB; font-family: 'Space Grotesk', -apple-system, sans-serif; min-height: 100vh; }
+
+    /* ===== LOGIN GATE ===== */
+    #loginGate {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 9999;
+      background: #0A0A10;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #loginGate .login-box {
+      background: rgba(17,24,39,0.8); border: 1px solid #1F2937; border-radius: 20px;
+      padding: 48px 40px; max-width: 400px; width: 90%; text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    #loginGate .login-icon { font-size: 3rem; margin-bottom: 16px; }
+    #loginGate h2 { font-size: 1.6rem; font-weight: 800; margin-bottom: 6px; }
+    #loginGate h2 .gold { color: #F59E0B; }
+    #loginGate .login-sub { color: #6B7280; font-size: 0.9rem; margin-bottom: 28px; }
+    #loginGate .pin-wrapper { position: relative; margin-bottom: 16px; }
+    #loginGate .pin-input {
+      width: 100%; background: #0F1219; border: 2px solid #1F2937; border-radius: 12px;
+      padding: 16px 50px 16px 16px; color: #E5E7EB; font-size: 1.1rem; font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 4px; text-align: center;
+    }
+    #loginGate .pin-input:focus { outline: none; border-color: #7C3AED; }
+    #loginGate .pin-input::placeholder { letter-spacing: 0; font-size: 0.9rem; color: #4B5563; }
+    #loginGate .toggle-vis {
+      position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: #6B7280; cursor: pointer; font-size: 1.1rem;
+    }
+    #loginGate .login-btn {
+      width: 100%; background: linear-gradient(135deg, #7C3AED, #A855F7); border: none;
+      border-radius: 12px; padding: 14px; color: white; font-size: 1rem; font-weight: 700;
+      cursor: pointer; font-family: inherit; transition: all 0.2s;
+    }
+    #loginGate .login-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    #loginGate .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    #loginGate .login-error {
+      color: #EF4444; font-size: 0.85rem; margin-top: 12px; min-height: 20px; font-weight: 600;
+    }
+    #loginGate .attempts-warn {
+      color: #F59E0B; font-size: 0.78rem; margin-top: 8px;
+    }
+    #loginGate .security-note {
+      margin-top: 24px; padding-top: 16px; border-top: 1px solid #1F2937;
+      color: #4B5563; font-size: 0.75rem;
+    }
+    #loginGate .security-note span { color: #10B981; }
+    #loginGate .lockout-msg {
+      color: #EF4444; font-size: 0.9rem; font-weight: 600; margin: 20px 0;
+    }
+
+    #appMain { display: none; }
+
+    .bg-glow {
+      position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
+      background: radial-gradient(circle at 25% 35%, rgba(124,58,237,0.1) 0%, transparent 50%),
+                  radial-gradient(circle at 75% 65%, rgba(245,158,11,0.06) 0%, transparent 40%);
+      z-index: 0; pointer-events: none;
+    }
+
+    .container { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+    /* Nav */
+    .topnav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .topnav .logo { font-size: 1.4rem; font-weight: 800; text-decoration: none;
+      background: linear-gradient(135deg, #7C3AED, #F59E0B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .topnav .links { display: flex; gap: 14px; }
+    .topnav .links a { color: #9CA3AF; text-decoration: none; font-size: 0.85rem; font-weight: 500; }
+    .topnav .links a:hover { color: #E5E7EB; }
+
+    /* Header */
+    .header { text-align: center; padding: 20px 0 28px; }
+    .header h1 { font-size: 2rem; font-weight: 800; }
+    .header h1 .gold { color: #F59E0B; }
+    .header p { color: #6B7280; margin-top: 6px; font-size: 0.95rem; }
+    .boss-badge { display: inline-block; background: linear-gradient(135deg, #7C3AED, #A855F7); padding: 6px 20px; border-radius: 100px; margin-top: 10px; font-weight: 600; font-size: 0.85rem; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; background: #111827; border-radius: 12px; padding: 4px; margin-bottom: 24px; overflow-x: auto; }
+    .tab { padding: 10px 20px; border-radius: 10px; font-size: 0.85rem; font-weight: 600; cursor: pointer; color: #9CA3AF; transition: all 0.2s; white-space: nowrap; }
+    .tab:hover { color: #E5E7EB; }
+    .tab.active { background: #7C3AED; color: white; }
+
+    /* Stats Row */
+    .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: rgba(17,24,39,0.7); border: 1px solid #1F2937; border-radius: 12px; padding: 16px; text-align: center; }
+    .stat-card .val { font-size: 1.6rem; font-weight: 800; background: linear-gradient(135deg, #7C3AED, #F59E0B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .stat-card .lbl { color: #6B7280; font-size: 0.78rem; margin-top: 4px; font-weight: 500; }
+
+    /* Section */
+    .section { background: rgba(17,24,39,0.5); border: 1px solid #1F2937; border-radius: 16px; padding: 24px; margin-bottom: 20px; }
+    .section-title { font-size: 1rem; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+    /* Agent Cards - Detailed */
+    .agent-detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+    .agent-detail-card { background: #0F1219; border: 1px solid #1F2937; border-radius: 14px; padding: 20px; transition: all 0.3s; position: relative; overflow: hidden; }
+    .agent-detail-card:hover { border-color: var(--ac); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+    .agent-detail-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--ac); }
+    .agent-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .agent-emoji { font-size: 2rem; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.05); border-radius: 12px; }
+    .agent-info h3 { font-size: 1.05rem; font-weight: 700; }
+    .agent-info .role { color: #9CA3AF; font-size: 0.8rem; font-weight: 500; }
+    .agent-status-dot { position: absolute; top: 16px; right: 16px; width: 10px; height: 10px; background: #10B981; border-radius: 50%; animation: pulse 2s infinite; }
+    .agent-tools { margin-top: 12px; }
+    .agent-tools-title { font-size: 0.75rem; color: #6B7280; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .tool-chip { display: inline-flex; align-items: center; gap: 4px; background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.2); padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; color: #A78BFA; margin: 0 6px 6px 0; }
+    .agent-desc { color: #9CA3AF; font-size: 0.82rem; line-height: 1.5; margin: 10px 0; }
+
+    /* Agent mini grid for selection */
+    .agent-select-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+    .agent-mini { background: #0F1219; border: 2px solid #1F2937; border-radius: 10px; padding: 12px 8px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .agent-mini:hover { border-color: #7C3AED; }
+    .agent-mini.selected { border-color: #A855F7; background: rgba(124,58,237,0.15); box-shadow: 0 0 16px rgba(124,58,237,0.2); }
+    .agent-mini .em { font-size: 1.4rem; }
+    .agent-mini .nm { font-size: 0.72rem; font-weight: 600; margin-top: 4px; }
+
+    /* Quick Commands */
+    .qc-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .qc-btn { background: #0F1219; border: 1px solid #1F2937; border-radius: 8px; padding: 8px 16px; color: #D1D5DB; cursor: pointer; font-size: 0.82rem; font-weight: 500; transition: all 0.2s; font-family: inherit; }
+    .qc-btn:hover { background: #7C3AED; border-color: #7C3AED; color: white; }
+
+    /* Order Input */
+    .order-input { width: 100%; background: #0F1219; border: 2px solid #1F2937; border-radius: 12px; padding: 16px; color: #E5E7EB; font-size: 0.95rem; resize: vertical; min-height: 80px; font-family: inherit; }
+    .order-input:focus { outline: none; border-color: #7C3AED; }
+    .order-input::placeholder { color: #4B5563; }
+    .submit-btn { margin-top: 12px; background: linear-gradient(135deg, #7C3AED, #A855F7); border: none; border-radius: 12px; padding: 14px 32px; color: white; font-size: 0.95rem; font-weight: 700; cursor: pointer; width: 100%; transition: all 0.2s; font-family: inherit; }
+    .submit-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Activity Feed */
+    .activity-feed { max-height: 700px; overflow-y: auto; }
+    .activity-item { background: #0F1219; border: 1px solid #1F2937; border-radius: 12px; padding: 16px; margin-bottom: 12px; transition: all 0.3s; }
+    .activity-item.processing { border-color: #F59E0B; }
+    .activity-item.completed { border-color: #10B981; }
+    .activity-item.failed { border-color: #EF4444; }
+    .activity-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .activity-order { font-weight: 700; font-size: 0.95rem; }
+    .activity-status { padding: 4px 12px; border-radius: 100px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .status-pending { background: #374151; color: #9CA3AF; }
+    .status-processing { background: rgba(245,158,11,0.15); color: #FCD34D; border: 1px solid rgba(245,158,11,0.3); }
+    .status-completed { background: rgba(16,185,129,0.15); color: #6EE7B7; border: 1px solid rgba(16,185,129,0.3); }
+    .status-failed { background: rgba(239,68,68,0.15); color: #FCA5A5; border: 1px solid rgba(239,68,68,0.3); }
+
+    .agent-step { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-top: 1px solid #1A1F2E; }
+    .step-icon { font-size: 1.2rem; min-width: 28px; text-align: center; }
+    .step-content { flex: 1; }
+    .step-name { font-weight: 600; font-size: 0.88rem; }
+    .step-status { font-size: 0.78rem; color: #6B7280; margin-top: 2px; }
+    .step-status.thinking { color: #FCD34D; }
+    .step-status.using_tool { color: #60A5FA; }
+    .step-status.completed { color: #6EE7B7; }
+    .step-response { background: #111827; border-radius: 8px; padding: 10px; margin-top: 8px; font-size: 0.82rem; color: #D1D5DB; white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; line-height: 1.5; }
+
+    /* Animations */
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .spinner { display: inline-block; animation: spin 1s linear infinite; }
+
+    /* Toast */
+    .toast { position: fixed; top: 20px; right: 20px; background: linear-gradient(135deg, #7C3AED, #A855F7); color: white; padding: 12px 24px; border-radius: 12px; font-weight: 600; font-size: 0.9rem; z-index: 1000; opacity: 0; transform: translateY(-20px); transition: all 0.3s; box-shadow: 0 8px 30px rgba(124,58,237,0.4); }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+
+    /* Tab panels */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Mobile */
+    @media (max-width: 640px) {
+      .agent-detail-grid { grid-template-columns: 1fr; }
+      .agent-select-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); }
+      .header h1 { font-size: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+
+  <!-- ===== LOGIN GATE ===== -->
+  <div id="loginGate">
+    <div class="login-box">
+      <div class="login-icon">🔐</div>
+      <h2>Boss <span class="gold">Access</span></h2>
+      <div class="login-sub">Enter your Boss PIN to access the Command Center</div>
+      <div id="loginForm">
+        <div class="pin-wrapper">
+          <input type="password" class="pin-input" id="pinInput" placeholder="Enter PIN" maxlength="20" autocomplete="off" onkeydown="if(event.key==='Enter')verifyPin()">
+          <button class="toggle-vis" onclick="togglePinVisibility()" id="toggleBtn">👁️</button>
+        </div>
+        <button class="login-btn" id="loginBtn" onclick="verifyPin()">Unlock Command Center</button>
+        <div class="login-error" id="loginError"></div>
+        <div class="attempts-warn" id="attemptsWarn"></div>
+      </div>
+      <div id="lockoutDiv" style="display:none;">
+        <div class="lockout-msg" id="lockoutMsg">Too many failed attempts. Locked for <span id="lockoutTimer">30</span>s</div>
+        <button class="login-btn" disabled id="lockoutBtn">Locked</button>
+      </div>
+      <div class="security-note">
+        <span>🔒 AES-256 Encrypted</span> • Session expires after 30 min of inactivity<br>
+        Max 5 attempts before lockout • All access is logged
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MAIN APP (hidden until authenticated) ===== -->
+  <div id="appMain">
+  <div class="container">
+    <!-- Nav -->
+    <div class="topnav">
+      <a href="/" class="logo">nearfo</a>
+      <div class="links">
+        <a href="/">Home</a>
+        <a href="/docs">API Docs</a>
+      </div>
+    </div>
+
+    <!-- Header -->
+    <div class="header">
+      <h1>Boss <span class="gold">Command Center</span></h1>
+      <p>13 AI Agents powered by Anthropic Claude — at your command</p>
+      <div class="boss-badge">Akash More — CEO & Founder</div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row" id="statsRow">
+      <div class="stat-card"><div class="val" id="statOrders">0</div><div class="lbl">Total Orders</div></div>
+      <div class="stat-card"><div class="val" id="statCompleted">0</div><div class="lbl">Completed</div></div>
+      <div class="stat-card"><div class="val" id="statTokens">0</div><div class="lbl">Tokens Used</div></div>
+      <div class="stat-card"><div class="val">13</div><div class="lbl">Active Agents</div></div>
+      <div class="stat-card"><div class="val">39</div><div class="lbl">Total Tools</div></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('agents')">AI Agents</div>
+      <div class="tab" onclick="switchTab('command')">Give Order</div>
+      <div class="tab" onclick="switchTab('activity')">Live Activity</div>
+    </div>
+
+    <!-- Tab 1: AI Agents -->
+    <div class="tab-panel active" id="panel-agents">
+      <div class="agent-detail-grid" id="agentDetailGrid"></div>
+    </div>
+
+    <!-- Tab 2: Command -->
+    <div class="tab-panel" id="panel-command">
+      <div class="section">
+        <div class="section-title">Select Agents</div>
+        <div class="agent-select-grid" id="agentSelectGrid"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Quick Commands</div>
+        <div class="qc-grid" id="qcGrid"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Your Order</div>
+        <textarea class="order-input" id="orderInput" placeholder="Type your order here... e.g. 'Give me a full platform health report' or 'Analyze our competitors'"></textarea>
+        <button class="submit-btn" id="submitBtn" onclick="submitOrder()">Send Order</button>
+      </div>
+    </div>
+
+    <!-- Tab 3: Live Activity -->
+    <div class="tab-panel" id="panel-activity">
+      <div class="activity-feed" id="activityFeed">
+        <div style="text-align: center; color: #4B5563; padding: 60px 20px;">
+          <div style="font-size: 2.5rem; margin-bottom: 12px;">📡</div>
+          <div style="font-weight: 600;">No orders yet</div>
+          <div style="font-size: 0.85rem; margin-top: 6px;">Switch to "Give Order" tab to command your agents</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  </div><!-- end appMain -->
+
+  <script>
+    // ===== BOSS SECURITY SYSTEM =====
+    const BOSS_SESSION_KEY = 'nearfo_boss_session';
+    const BOSS_LOCKOUT_KEY = 'nearfo_boss_lockout';
+    const BOSS_ATTEMPTS_KEY = 'nearfo_boss_attempts';
+    const MAX_ATTEMPTS = 5;
+    const LOCKOUT_DURATION = 60 * 1000; // 60 seconds
+    const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+
+    function checkExistingSession() {
+      const session = sessionStorage.getItem(BOSS_SESSION_KEY);
+      if (session) {
+        try {
+          const s = JSON.parse(session);
+          if (s.token && s.expiry > Date.now()) {
+            unlockApp(s.token);
+            return true;
+          } else {
+            sessionStorage.removeItem(BOSS_SESSION_KEY);
+          }
+        } catch(e) { sessionStorage.removeItem(BOSS_SESSION_KEY); }
+      }
+      return false;
+    }
+
+    function checkLockout() {
+      const lockout = localStorage.getItem(BOSS_LOCKOUT_KEY);
+      if (lockout) {
+        const lockTime = parseInt(lockout);
+        const remaining = lockTime + LOCKOUT_DURATION - Date.now();
+        if (remaining > 0) {
+          showLockout(Math.ceil(remaining / 1000));
+          return true;
+        } else {
+          localStorage.removeItem(BOSS_LOCKOUT_KEY);
+          localStorage.setItem(BOSS_ATTEMPTS_KEY, '0');
+        }
+      }
+      updateAttemptsWarning();
+      return false;
+    }
+
+    function showLockout(seconds) {
+      document.getElementById('loginForm').style.display = 'none';
+      document.getElementById('lockoutDiv').style.display = 'block';
+      document.getElementById('lockoutTimer').textContent = seconds;
+      const interval = setInterval(() => {
+        seconds--;
+        if (seconds <= 0) {
+          clearInterval(interval);
+          document.getElementById('loginForm').style.display = 'block';
+          document.getElementById('lockoutDiv').style.display = 'none';
+          localStorage.removeItem(BOSS_LOCKOUT_KEY);
+          localStorage.setItem(BOSS_ATTEMPTS_KEY, '0');
+          updateAttemptsWarning();
+        } else {
+          document.getElementById('lockoutTimer').textContent = seconds;
+        }
+      }, 1000);
+    }
+
+    function updateAttemptsWarning() {
+      const attempts = parseInt(localStorage.getItem(BOSS_ATTEMPTS_KEY) || '0');
+      const warn = document.getElementById('attemptsWarn');
+      if (attempts >= 3) {
+        warn.textContent = `${MAX_ATTEMPTS - attempts} attempt(s) remaining before lockout`;
+      } else {
+        warn.textContent = '';
+      }
+    }
+
+    async function verifyPin() {
+      const pin = document.getElementById('pinInput').value.trim();
+      if (!pin) return;
+
+      const btn = document.getElementById('loginBtn');
+      const errorEl = document.getElementById('loginError');
+      btn.disabled = true;
+      btn.textContent = 'Verifying...';
+      errorEl.textContent = '';
+
+      try {
+        const res = await fetch('/api/boss/verify-access', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin }),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          // Reset attempts
+          localStorage.setItem(BOSS_ATTEMPTS_KEY, '0');
+          // Store session
+          const session = {
+            token: data.token,
+            expiry: Date.now() + SESSION_TIMEOUT,
+          };
+          sessionStorage.setItem(BOSS_SESSION_KEY, JSON.stringify(session));
+          unlockApp(data.token);
+        } else {
+          // Increment attempts
+          const attempts = parseInt(localStorage.getItem(BOSS_ATTEMPTS_KEY) || '0') + 1;
+          localStorage.setItem(BOSS_ATTEMPTS_KEY, String(attempts));
+
+          if (attempts >= MAX_ATTEMPTS) {
+            localStorage.setItem(BOSS_LOCKOUT_KEY, String(Date.now()));
+            showLockout(Math.ceil(LOCKOUT_DURATION / 1000));
+          } else {
+            errorEl.textContent = data.message || 'Invalid PIN';
+            updateAttemptsWarning();
+            // Shake animation
+            document.querySelector('.pin-input').style.animation = 'shake 0.4s ease';
+            setTimeout(() => document.querySelector('.pin-input').style.animation = '', 400);
+          }
+        }
+      } catch (err) {
+        errorEl.textContent = 'Network error. Try again.';
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Unlock Command Center';
+    }
+
+    function unlockApp(token) {
+      document.getElementById('loginGate').style.display = 'none';
+      document.getElementById('appMain').style.display = 'block';
+      // Set the boss token for API calls
+      window.BOSS_TOKEN = token;
+      // Start session timeout monitor
+      startSessionMonitor();
+      // Initialize the app
+      initApp();
+    }
+
+    function startSessionMonitor() {
+      let lastActivity = Date.now();
+      const events = ['click', 'keydown', 'mousemove', 'scroll'];
+      events.forEach(e => document.addEventListener(e, () => { lastActivity = Date.now(); }));
+      setInterval(() => {
+        if (Date.now() - lastActivity > SESSION_TIMEOUT) {
+          sessionStorage.removeItem(BOSS_SESSION_KEY);
+          location.reload();
+        }
+        // Refresh session expiry on activity
+        const session = sessionStorage.getItem(BOSS_SESSION_KEY);
+        if (session) {
+          const s = JSON.parse(session);
+          s.expiry = Date.now() + SESSION_TIMEOUT;
+          sessionStorage.setItem(BOSS_SESSION_KEY, JSON.stringify(s));
+        }
+      }, 60000); // Check every minute
+    }
+
+    function togglePinVisibility() {
+      const input = document.getElementById('pinInput');
+      const btn = document.getElementById('toggleBtn');
+      if (input.type === 'password') { input.type = 'text'; btn.textContent = '🙈'; }
+      else { input.type = 'password'; btn.textContent = '👁️'; }
+    }
+
+    // Shake animation
+    const shakeStyle = document.createElement('style');
+    shakeStyle.textContent = `@keyframes shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }`;
+    document.head.appendChild(shakeStyle);
+
+    // On page load: check session or lockout
+    if (!checkExistingSession()) {
+      checkLockout();
+      document.getElementById('pinInput').focus();
+    }
+  </script>
+
+  <script>
+    const API_BASE = window.location.origin + '/api/boss';
+    let bossHeaders = { 'Content-Type': 'application/json' };
+    let selectedAgents = new Set(['all']);
+    let orders = {};
+
+    function getHeaders() {
+      const token = window.BOSS_TOKEN || localStorage.getItem('nearfo_token') || '';
+      return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'X-Boss-Token': window.BOSS_TOKEN || '' };
+    }
+    // Alias for backward compat
+    const headers = new Proxy({}, { get(_, prop) { return getHeaders()[prop]; } });
+
+    // Full agent definitions with tools — original roles
+    const agentsFull = [
+      { id: 'shield', name: 'Shield', emoji: '🛡️', role: 'Content Moderation Agent', color: '#3B82F6',
+        desc: 'Protecting Nearfo\'s community with full dedication. Scans content, enforces guidelines, and keeps the platform safe 24/7.',
+        tools: ['scan_codebase', 'check_user_activity', 'audit_permissions'] },
+      { id: 'care', name: 'Care', emoji: '💜', role: 'Customer Support Agent', color: '#8B5CF6',
+        desc: 'Taking care of every Nearfo user. Handles complaints, analyzes feedback, and ensures user satisfaction.',
+        tools: ['analyze_feedback', 'draft_response', 'get_user_metrics'] },
+      { id: 'blaze', name: 'Blaze', emoji: '🔥', role: 'Marketing & Growth Agent', color: '#F97316',
+        desc: 'Hustling for Nearfo\'s billion-dollar future. Drives user acquisition, creates campaigns, and analyzes growth metrics.',
+        tools: ['analyze_growth', 'create_campaign', 'competitor_intel'] },
+      { id: 'pulse', name: 'Pulse', emoji: '📊', role: 'Analytics & Reporting Agent', color: '#06B6D4',
+        desc: 'Keeping a pulse on every metric. Tracks KPIs, generates reports, and provides data-driven business intelligence.',
+        tools: ['get_platform_stats', 'generate_report', 'forecast'] },
+      { id: 'vibe', name: 'Vibe', emoji: '🌊', role: 'Community Management Agent', color: '#8B5CF6',
+        desc: 'Building Nearfo\'s community, one vibe at a time. Manages engagement, content strategy, and social presence.',
+        tools: ['create_content_plan', 'write_post', 'analyze_engagement'] },
+      { id: 'sentinel', name: 'Sentinel', emoji: '🔐', role: 'DevOps & Infrastructure Agent', color: '#10B981',
+        desc: 'Standing guard over Nearfo\'s infrastructure. Monitors servers, APIs, databases, and ensures system reliability.',
+        tools: ['check_system_health', 'check_api_performance', 'check_database'] },
+      { id: 'phoenix', name: 'Phoenix', emoji: '🔥', role: 'App Quality & Innovation Agent', color: '#EF4444',
+        desc: 'From the ashes of every bug, Nearfo rises stronger. Handles incidents, recovery, and drives app quality improvements.',
+        tools: ['assess_incident', 'create_recovery_plan', 'check_backups'] },
+      { id: 'hawk', name: 'Hawk', emoji: '🦅', role: 'Website Quality & Performance Agent', color: '#78716C',
+        desc: 'Every pixel matters, every millisecond counts. Tracks performance, monitors trends, and optimizes user experience.',
+        tools: ['track_competitors', 'analyze_user_flows', 'market_intel'] },
+      { id: 'justice', name: 'Justice', emoji: '⚖️', role: 'Legal & Compliance Agent', color: '#6366F1',
+        desc: 'The law protects, and so do I. Enforces policies, handles compliance, ensures platform integrity and fairness.',
+        tools: ['review_reports', 'detect_spam', 'moderate_content'] },
+      { id: 'crown', name: 'Crown', emoji: '👑', role: 'CEO Advisory & Strategy Agent', color: '#F59E0B',
+        desc: 'Your right hand for billion-dollar decisions. Strategic planning, roadmaps, investor prep, and executive insights.',
+        tools: ['create_roadmap', 'strategic_analysis', 'investor_prep'] },
+      { id: 'shadow', name: 'Shadow', emoji: '👻', role: 'Competitor Analysis & Intelligence Agent', color: '#6B7280',
+        desc: 'Watching every move they make. Deep competitor analysis, market gaps, and strategic intelligence gathering.',
+        tools: ['analyze_competitor', 'find_gaps', 'competitive_report'] },
+      { id: 'aura', name: 'Aura', emoji: '🌸', role: 'Chief Doctor Agent', color: '#EC4899',
+        desc: 'The chief doctor of all agents. Takes care of every agent, keeps them in check, manages their health and performance, and maintains herself too.',
+        tools: ['brand_audit', 'design_system', 'ux_review'] },
+      { id: 'bolt', name: 'Bolt', emoji: '⚡', role: 'Universal Satellite — Instant Command Agent', color: '#FACC15',
+        desc: 'The universal satellite for instant commands. Executes tasks at lightning speed, automates workflows, and delivers results before you even finish thinking.',
+        tools: ['performance_audit', 'create_automation', 'optimize_queries'] },
+    ];
+
+    const agentsWithAll = [{ id: 'all', name: 'All Agents', emoji: '👥' }, ...agentsFull];
+
+    const quickCmds = [
+      { name: 'Status Report', icon: '📊' },
+      { name: 'Find Bugs', icon: '🐛' },
+      { name: 'Full Audit', icon: '🔍' },
+      { name: 'Growth Ideas', icon: '💡' },
+      { name: 'Security Check', icon: '🔐' },
+      { name: 'Competitor Analysis', icon: '🦅' },
+      { name: 'Investor Prep', icon: '💰' },
+      { name: 'Send Email Report', icon: '📧' },
+    ];
+
+    // ===== TAB SWITCHING =====
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.querySelector(`.tab-panel#panel-${tabId}`).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    // ===== RENDER AGENT DETAIL GRID =====
+    function renderAgentDetails() {
+      const grid = document.getElementById('agentDetailGrid');
+      grid.innerHTML = agentsFull.map(a => `
+        <div class="agent-detail-card" style="--ac: ${a.color};">
+          <div class="agent-status-dot"></div>
+          <div class="agent-top">
+            <div class="agent-emoji">${a.emoji}</div>
+            <div class="agent-info">
+              <h3>${a.name}</h3>
+              <div class="role">${a.role}</div>
+            </div>
+          </div>
+          <div class="agent-desc">${a.desc}</div>
+          <div class="agent-tools">
+            <div class="agent-tools-title">Tools (${a.tools.length})</div>
+            ${a.tools.map(t => `<span class="tool-chip">${t}</span>`).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // ===== RENDER AGENT SELECT GRID =====
+    function renderAgentSelect() {
+      const grid = document.getElementById('agentSelectGrid');
+      grid.innerHTML = agentsWithAll.map(a => `
+        <div class="agent-mini ${selectedAgents.has(a.id) ? 'selected' : ''}" onclick="toggleAgent('${a.id}')">
+          <div class="em">${a.emoji}</div>
+          <div class="nm">${a.name}</div>
+        </div>
+      `).join('');
+    }
+
+    function toggleAgent(id) {
+      if (id === 'all') { selectedAgents.clear(); selectedAgents.add('all'); }
+      else {
+        selectedAgents.delete('all');
+        if (selectedAgents.has(id)) selectedAgents.delete(id);
+        else selectedAgents.add(id);
+        if (selectedAgents.size === 0) selectedAgents.add('all');
+      }
+      renderAgentSelect();
+    }
+
+    // ===== RENDER QUICK COMMANDS =====
+    function renderQuickCmds() {
+      document.getElementById('qcGrid').innerHTML = quickCmds.map(q =>
+        `<button class="qc-btn" onclick="executeQuickCommand('${q.name}')">${q.icon} ${q.name}</button>`
+      ).join('');
+    }
+
+    // ===== SUBMIT ORDER =====
+    async function submitOrder() {
+      const input = document.getElementById('orderInput');
+      const order = input.value.trim();
+      if (!order) return showToast('Type an order first!');
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner">⚡</span> Sending...';
+      try {
+        const res = await fetch(API_BASE + '/order', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ order, agents: [...selectedAgents] }) });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Order sent! Agents working...');
+          input.value = '';
+          addOrderToFeed(data.data.orderId, order, [...selectedAgents]);
+          switchTab('activity'); document.querySelectorAll('.tab')[2].classList.add('active'); document.querySelectorAll('.tab')[1].classList.remove('active');
+          loadDashboard();
+        } else showToast('Error: ' + (data.message || 'Failed'));
+      } catch (err) { showToast('Network error: ' + err.message); }
+      btn.disabled = false; btn.innerHTML = 'Send Order';
+    }
+
+    async function executeQuickCommand(command) {
+      try {
+        const res = await fetch(API_BASE + '/quick-command', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ command }) });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`${command} initiated!`);
+          addOrderToFeed(data.data.orderId, `Quick: ${command}`, data.data.agents);
+          switchTab('activity'); document.querySelectorAll('.tab')[2].classList.add('active'); document.querySelectorAll('.tab')[1].classList.remove('active');
+          loadDashboard();
+        } else showToast('Error: ' + data.message);
+      } catch (err) { showToast('Network error: ' + err.message); }
+    }
+
+    // ===== ACTIVITY FEED =====
+    function addOrderToFeed(orderId, orderText, agentIds) {
+      const feed = document.getElementById('activityFeed');
+      if (feed.querySelector('div[style]')) feed.innerHTML = '';
+
+      const steps = agentIds.map(id => {
+        const agent = agentsFull.find(a => a.id === id) || { emoji: '🤖', name: id };
+        return `<div class="agent-step" id="step-${orderId}-${id}">
+          <div class="step-icon">${agent.emoji}</div>
+          <div class="step-content">
+            <div class="step-name">${agent.name}</div>
+            <div class="step-status thinking" id="step-status-${orderId}-${id}">Queued...</div>
+            <div class="step-response" id="step-response-${orderId}-${id}" style="display:none;"></div>
+          </div>
+        </div>`;
+      }).join('');
+
+      feed.insertAdjacentHTML('afterbegin', `
+        <div class="activity-item processing" id="order-${orderId}">
+          <div class="activity-header">
+            <div class="activity-order">${orderText}</div>
+            <div class="activity-status status-processing">Processing</div>
+          </div>
+          ${steps}
+        </div>
+      `);
+      orders[orderId] = { agentIds };
+    }
+
+    // ===== SOCKET.IO =====
+    const socket = io(window.location.origin);
+    socket.on('connect', () => { socket.emit('boss_connect', 'boss'); });
+
+    socket.on('agent_update', (data) => {
+      const { orderId, agentId, status, toolUsed, response } = data;
+      const statusEl = document.getElementById(`step-status-${orderId}-${agentId}`);
+      const responseEl = document.getElementById(`step-response-${orderId}-${agentId}`);
+      if (statusEl) {
+        const map = { thinking: 'Thinking...', using_tool: `Using: ${toolUsed || '...'}`, completed: 'Done', failed: 'Failed' };
+        statusEl.textContent = map[status] || status;
+        statusEl.className = `step-status ${status}`;
+      }
+      if (responseEl && response) { responseEl.textContent = response; responseEl.style.display = 'block'; }
+    });
+
+    socket.on('order_status', (data) => {
+      const el = document.getElementById(`order-${data.orderId}`);
+      if (el) {
+        el.className = `activity-item ${data.status}`;
+        const badge = el.querySelector('.activity-status');
+        if (badge) { badge.className = `activity-status status-${data.status}`; badge.textContent = data.status; }
+      }
+    });
+
+    socket.on('order_complete', (data) => {
+      showToast(`Order done! ${data.totalTokens} tokens, ${(data.processingTimeMs/1000).toFixed(1)}s`);
+      loadDashboard();
+    });
+
+    // ===== DASHBOARD =====
+    async function loadDashboard() {
+      try {
+        const res = await fetch(API_BASE + '/dashboard', { headers: getHeaders() });
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('statOrders').textContent = data.data.totalOrders;
+          document.getElementById('statCompleted').textContent = data.data.completedOrders;
+          document.getElementById('statTokens').textContent = (data.data.totalTokensUsed || 0).toLocaleString();
+        }
+      } catch (e) {}
+    }
+
+    async function loadRecentOrders() {
+      try {
+        const res = await fetch(API_BASE + '/orders?limit=10', { headers: getHeaders() });
+        const data = await res.json();
+        if (data.success && data.data.length > 0) {
+          data.data.forEach(order => {
+            if (!document.getElementById(`order-${order._id}`)) {
+              addOrderToFeed(order._id, order.order, order.targetAgents);
+              const el = document.getElementById(`order-${order._id}`);
+              if (el) {
+                el.className = `activity-item ${order.status}`;
+                const badge = el.querySelector('.activity-status');
+                if (badge) { badge.className = `activity-status status-${order.status}`; badge.textContent = order.status; }
+              }
+            }
+          });
+        }
+      } catch (e) {}
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    // ===== INIT =====
+    function initApp() {
+      renderAgentDetails();
+      renderAgentSelect();
+      renderQuickCmds();
+      loadDashboard();
+      loadRecentOrders();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+  "project_info": {
+    "project_number": "87261108393",
+    "project_id": "nearfo-d4f7e",
+    "storage_bucket": "nearfo-d4f7e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:87261108393:android:d7f94a14a99cc21a3a71b8",
+        "android_client_info": {
+          "package_name": "com.nearfo.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "87261108393-7jcn3lo31n5759c8ms8i86f3vi3i212c.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nearfo.app",
+            "certificate_hash": "6bf95040e0640bd1e750955f0176b4b3fd440386"
+          }
+        },
+        {
+          "client_id": "87261108393-12m11nf96s4bu4pvfc7497khjfucam7q.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nearfo.app",
+            "certificate_hash": "fe358ab509dfbd23317bbeb07e80f731adffdf5d"
+          }
+        },
+        {
+          "client_id": "87261108393-44cp31jl393htkssdiun2em47ue1ctpd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nearfo.app",
+            "certificate_hash": "7938cd7c285a37482163c124930789c184dcff8f"
+          }
+        },
+        {
+          "client_id": "87261108393-s8epfmevb5odfogpgg37nf44ltjo3947.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhj2Bzmz5sCNNF5yWpzWN0x3GaTM3RKaw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "87261108393-s8epfmevb5odfogpgg37nf44ltjo3947.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

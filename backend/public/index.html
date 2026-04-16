@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nearfo — Know Your Circle</title>
+  <meta name="description" content="Nearfo is a hyper-local social media app that connects you with people nearby. Discover, chat, share reels, and build your local circle.">
+  <meta name="theme-color" content="#7C3AED">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0A0A10;
+      color: #E5E7EB;
+      font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Animated gradient background */
+    .bg-glow {
+      position: fixed;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle at 30% 40%, rgba(124,58,237,0.12) 0%, transparent 50%),
+                  radial-gradient(circle at 70% 60%, rgba(168,85,247,0.08) 0%, transparent 50%),
+                  radial-gradient(circle at 50% 20%, rgba(245,158,11,0.06) 0%, transparent 40%);
+      animation: bgFloat 20s ease-in-out infinite alternate;
+      z-index: 0;
+      pointer-events: none;
+    }
+    @keyframes bgFloat {
+      0% { transform: translate(0, 0); }
+      100% { transform: translate(-5%, -3%); }
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Nav */
+    nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 24px 0;
+    }
+    .logo {
+      font-size: 1.6rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #7C3AED, #A855F7, #F59E0B);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+    .nav-links { display: flex; gap: 20px; align-items: center; }
+    .nav-links a {
+      color: #9CA3AF;
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: #E5E7EB; }
+    .nav-badge {
+      background: linear-gradient(135deg, #7C3AED, #A855F7);
+      color: white;
+      padding: 8px 20px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-decoration: none;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .nav-badge:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(124,58,237,0.4); }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      padding: 80px 0 60px;
+    }
+    .hero-tagline {
+      display: inline-block;
+      background: rgba(124,58,237,0.15);
+      border: 1px solid rgba(124,58,237,0.3);
+      padding: 6px 18px;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      color: #A855F7;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4.2rem);
+      font-weight: 800;
+      line-height: 1.1;
+      margin-bottom: 20px;
+      letter-spacing: -1.5px;
+    }
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, #7C3AED, #A855F7, #F59E0B);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 1.15rem;
+      color: #9CA3AF;
+      max-width: 560px;
+      margin: 0 auto 36px;
+      line-height: 1.7;
+    }
+    .hero-cta {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #7C3AED, #A855F7);
+      color: white;
+      padding: 14px 36px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 1rem;
+      text-decoration: none;
+      transition: all 0.3s;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 8px 30px rgba(124,58,237,0.5); }
+    .btn-outline {
+      background: transparent;
+      color: #E5E7EB;
+      padding: 14px 36px;
+      border-radius: 14px;
+      font-weight: 600;
+      font-size: 1rem;
+      text-decoration: none;
+      border: 1.5px solid #374151;
+      transition: all 0.3s;
+    }
+    .btn-outline:hover { border-color: #7C3AED; background: rgba(124,58,237,0.08); }
+
+    /* Stats */
+    .stats {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      margin: 60px 0;
+      flex-wrap: wrap;
+    }
+    .stat { text-align: center; }
+    .stat-value {
+      font-size: 2.4rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #7C3AED, #F59E0B);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .stat-label { color: #6B7280; font-size: 0.85rem; font-weight: 500; margin-top: 4px; }
+
+    /* Features */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      margin: 40px 0 60px;
+    }
+    .feature-card {
+      background: rgba(17,24,39,0.6);
+      border: 1px solid #1F2937;
+      border-radius: 16px;
+      padding: 28px;
+      transition: all 0.3s;
+    }
+    .feature-card:hover { border-color: rgba(124,58,237,0.4); transform: translateY(-4px); }
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      margin-bottom: 16px;
+    }
+    .feature-card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 8px; }
+    .feature-card p { color: #9CA3AF; font-size: 0.9rem; line-height: 1.6; }
+
+    /* AI Section */
+    .ai-section {
+      background: linear-gradient(135deg, rgba(124,58,237,0.1), rgba(245,158,11,0.05));
+      border: 1px solid rgba(124,58,237,0.2);
+      border-radius: 20px;
+      padding: 48px;
+      text-align: center;
+      margin: 40px 0;
+    }
+    .ai-section h2 { font-size: 1.8rem; font-weight: 800; margin-bottom: 12px; }
+    .ai-section p { color: #9CA3AF; max-width: 600px; margin: 0 auto 24px; line-height: 1.7; }
+    .agent-pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 20px; }
+    .agent-pill {
+      background: rgba(17,24,39,0.8);
+      border: 1px solid #2D2D44;
+      padding: 8px 16px;
+      border-radius: 100px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid #1F2937;
+      padding: 40px 0;
+      margin-top: 60px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .footer-logo {
+      font-size: 1.2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #7C3AED, #A855F7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .footer-text { color: #6B7280; font-size: 0.82rem; }
+    .footer-links { display: flex; gap: 20px; }
+    .footer-links a { color: #6B7280; text-decoration: none; font-size: 0.82rem; transition: color 0.2s; }
+    .footer-links a:hover { color: #A855F7; }
+
+    /* Pulse animation */
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    .pulse { animation: pulse 2s infinite; }
+
+    /* Mobile */
+    @media (max-width: 640px) {
+      .hero { padding: 50px 0 40px; }
+      .stats { gap: 24px; }
+      .ai-section { padding: 28px 20px; }
+      footer { flex-direction: column; text-align: center; }
+      .nav-links a:not(.nav-badge) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+
+  <div class="container">
+    <!-- Nav -->
+    <nav>
+      <div class="logo">nearfo</div>
+      <div class="nav-links">
+        <a href="/docs">API Docs</a>
+        <a href="/boss" class="nav-badge">Boss Center</a>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-tagline">Hyper-Local Social Media</div>
+      <h1>
+        Discover People<br>
+        <span class="gradient">In Your Circle</span>
+      </h1>
+      <p>
+        Nearfo connects you with people nearby. Share moments, discover local content,
+        chat in real-time, and build meaningful connections within your neighbourhood.
+      </p>
+      <div class="hero-cta">
+        <a href="#download" class="btn-primary">Download App</a>
+        <a href="/docs" class="btn-outline">API Docs</a>
+      </div>
+    </section>
+
+    <!-- Stats -->
+    <div class="stats" id="stats">
+      <div class="stat">
+        <div class="stat-value" id="stat-users">—</div>
+        <div class="stat-label">Users</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="stat-posts">—</div>
+        <div class="stat-label">Posts</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="stat-reels">—</div>
+        <div class="stat-label">Reels</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value pulse">LIVE</div>
+        <div class="stat-label">Server Status</div>
+      </div>
+    </div>
+
+    <!-- Features -->
+    <div class="features">
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(124,58,237,0.15);">📍</div>
+        <h3>Hyper-Local Feed</h3>
+        <p>See posts, reels, and stories from people near you. Your feed is your neighbourhood.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(245,158,11,0.15);">💬</div>
+        <h3>Real-Time Chat</h3>
+        <p>End-to-end encrypted messaging with voice notes, media sharing, typing indicators, and read receipts.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(59,130,246,0.15);">🎬</div>
+        <h3>Short Reels</h3>
+        <p>Create and watch short video reels from your local community. Go viral in your circle.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(16,185,129,0.15);">📞</div>
+        <h3>Voice & Video Calls</h3>
+        <p>WebRTC-powered voice and video calls. Crystal clear, peer-to-peer, no middleman.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(236,72,153,0.15);">📖</div>
+        <h3>Stories</h3>
+        <p>Share 24-hour disappearing stories with your followers. Add text, stickers, and location tags.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(139,92,246,0.15);">🏆</div>
+        <h3>Nearfo Score</h3>
+        <p>Your reputation score based on activity, engagement, and community trust. Earn badges and perks.</p>
+      </div>
+    </div>
+
+    <!-- AI Section -->
+    <div class="ai-section">
+      <h2>Powered by 13 AI Agents</h2>
+      <p>
+        Nearfo is managed by an intelligent system of AI agents powered by Anthropic Claude.
+        From content moderation to analytics — they run 24/7 to keep the platform safe and thriving.
+      </p>
+      <div class="agent-pills">
+        <div class="agent-pill">🛡️ Shield</div>
+        <div class="agent-pill">💚 Care</div>
+        <div class="agent-pill">🔥 Blaze</div>
+        <div class="agent-pill">📊 Pulse</div>
+        <div class="agent-pill">✨ Vibe</div>
+        <div class="agent-pill">🔍 Sentinel</div>
+        <div class="agent-pill">🔄 Phoenix</div>
+        <div class="agent-pill">🦅 Hawk</div>
+        <div class="agent-pill">⚖️ Justice</div>
+        <div class="agent-pill">👑 Crown</div>
+        <div class="agent-pill">🕵️ Shadow</div>
+        <div class="agent-pill">💜 Aura</div>
+        <div class="agent-pill">⚡ Bolt</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+      <div>
+        <div class="footer-logo">nearfo</div>
+        <div class="footer-text" style="margin-top:4px;">Know Your Circle</div>
+      </div>
+      <div class="footer-text">&copy; 2026 Nearfo. All rights reserved.</div>
+      <div class="footer-links">
+        <a href="/docs">API Health</a>
+        <a href="/boss">Boss Center</a>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    // Fetch live stats from API
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/boss/dashboard', {
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.data) {
+            // Use dashboard data if available
+          }
+        }
+      } catch(e) {}
+
+      // Fetch user/post counts from health or separate endpoints
+      try {
+        const res = await fetch('/api/health');
+        if (res.ok) {
+          document.getElementById('stat-users').textContent = '—';
+          document.getElementById('stat-posts').textContent = '—';
+          document.getElementById('stat-reels').textContent = '—';
+        }
+      } catch(e) {}
+    }
+    loadStats();
+  </script>
+</body>
+</html>

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nearfo API Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0A0A10; color: #E5E7EB; font-family: 'Space Grotesk', sans-serif; min-height: 100vh; }
+
+    .bg-glow {
+      position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
+      background: radial-gradient(circle at 30% 40%, rgba(59,130,246,0.1) 0%, transparent 50%),
+                  radial-gradient(circle at 70% 60%, rgba(124,58,237,0.08) 0%, transparent 50%);
+      z-index: 0; pointer-events: none;
+    }
+
+    .container { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+    nav { display: flex; justify-content: space-between; align-items: center; padding: 24px 0; }
+    .logo { font-size: 1.6rem; font-weight: 800; text-decoration: none;
+      background: linear-gradient(135deg, #7C3AED, #A855F7, #F59E0B);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .nav-links { display: flex; gap: 16px; align-items: center; }
+    .nav-links a { color: #9CA3AF; text-decoration: none; font-size: 0.9rem; font-weight: 500; transition: color 0.2s; }
+    .nav-links a:hover { color: #E5E7EB; }
+
+    .hero { text-align: center; padding: 50px 0 40px; }
+    .hero h1 { font-size: 2.2rem; font-weight: 800; margin-bottom: 10px; }
+    .hero h1 span { background: linear-gradient(135deg, #3B82F6, #7C3AED); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .hero p { color: #9CA3AF; font-size: 1rem; }
+
+    /* Status bar */
+    .status-bar {
+      display: flex; justify-content: center; gap: 24px; margin: 24px 0 40px; flex-wrap: wrap;
+    }
+    .status-item {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(17,24,39,0.6); border: 1px solid #1F2937; border-radius: 10px; padding: 10px 18px;
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #10B981; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+    .status-item span { font-size: 0.85rem; color: #9CA3AF; }
+    .status-item strong { color: #E5E7EB; font-size: 0.85rem; }
+
+    /* Base URL */
+    .base-url {
+      background: rgba(17,24,39,0.8); border: 1px solid #1F2937; border-radius: 12px;
+      padding: 16px 24px; margin-bottom: 32px; display: flex; align-items: center; gap: 12px;
+    }
+    .base-url .label { color: #6B7280; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    .base-url code { font-family: 'JetBrains Mono', monospace; color: #A855F7; font-size: 0.95rem; }
+
+    /* Endpoint groups */
+    .group { margin-bottom: 32px; }
+    .group-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding-bottom: 10px;
+      border-bottom: 1px solid #1F2937;
+    }
+    .group-icon { font-size: 1.3rem; }
+    .group-title { font-size: 1.15rem; font-weight: 700; }
+    .group-count { background: rgba(124,58,237,0.15); color: #A855F7; padding: 2px 10px; border-radius: 100px; font-size: 0.75rem; font-weight: 600; }
+
+    /* Endpoint */
+    .endpoint {
+      background: rgba(17,24,39,0.5); border: 1px solid #1F2937; border-radius: 10px;
+      padding: 14px 18px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px;
+      transition: border-color 0.2s;
+    }
+    .endpoint:hover { border-color: rgba(124,58,237,0.4); }
+    .method {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 700;
+      padding: 4px 10px; border-radius: 6px; min-width: 56px; text-align: center;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .method.get { background: rgba(16,185,129,0.15); color: #10B981; }
+    .method.post { background: rgba(59,130,246,0.15); color: #3B82F6; }
+    .method.put { background: rgba(245,158,11,0.15); color: #F59E0B; }
+    .method.delete { background: rgba(239,68,68,0.15); color: #EF4444; }
+    .path { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #D1D5DB; }
+    .desc { color: #6B7280; font-size: 0.82rem; margin-left: auto; }
+    .auth-badge { background: rgba(245,158,11,0.1); color: #F59E0B; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+
+    footer { border-top: 1px solid #1F2937; padding: 30px 0; margin-top: 40px; text-align: center; }
+    footer p { color: #6B7280; font-size: 0.82rem; }
+    footer a { color: #A855F7; text-decoration: none; }
+
+    @media (max-width: 640px) {
+      .endpoint { flex-wrap: wrap; gap: 8px; }
+      .desc { margin-left: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="container">
+    <nav>
+      <a href="/" class="logo">nearfo</a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/boss">Boss Center</a>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <h1>Nearfo <span>API Docs</span></h1>
+      <p>RESTful API for the Nearfo hyper-local social platform</p>
+    </section>
+
+    <div class="status-bar">
+      <div class="status-item">
+        <div class="status-dot" id="health-dot"></div>
+        <span>Server:</span> <strong id="health-status">Checking...</strong>
+      </div>
+      <div class="status-item">
+        <span>Version:</span> <strong id="api-version">1.0.0</strong>
+      </div>
+      <div class="status-item">
+        <span>Base:</span> <strong>https://nearfo.com/api</strong>
+      </div>
+    </div>
+
+    <div class="base-url">
+      <div class="label">Base URL</div>
+      <code>https://nearfo.com/api</code>
+    </div>
+
+    <!-- Auth -->
+    <div class="group">
+      <div class="group-header">
+        <span class="group-icon">🔐</span>
+        <span class="group-title">Authentication</span>
+        <span class="group-count">4 endpoints</span>
+      </div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/auth/verify-otp</span><span class="desc">Verify OTP & get JWT token</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/auth/send-otp</span><span class="desc">Send OTP to phone</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/auth/register</span><span class="desc">Register new user</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/auth/me</span><span class="desc">Get current user</span><span class="auth-badge">Auth</span></div>
+    </div>
+
+    <!-- Users -->
+    <div class="group">
+      <div class="group-header">
+        <span class="group-icon">👤</span>
+        <span class="group-title">Users</span>
+        <span class="group-count">7 endpoints</span>
+      </div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/users/me</span><span class="desc">Get my profile</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method put">PUT</span><span class="path">/users/me</span><span class="desc">Update my profile</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/users/:id</span><span class="desc">Get user by ID</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/users/search</span><span class="desc">Search users</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/users/nearby</span><span class="desc">Nearby users by location</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/users/:id/follow</span><span class="desc">Follow / unfollow user</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/users/:id/followers</span><span class="desc">Get followers list</span><span class="auth-badge">Auth</span></div>
+    </div>
+
+    <!-- Posts -->
+    <div class="group">
+      <div class="group-header">
+        <span class="group-icon">📝</span>
+        <span class="group-title">Posts</span>
+        <span class="group-count">8 endpoints</span>
+      </div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/posts/feed</span><span class="desc">Get personalized feed</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/posts</span><span class="desc">Create new post</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/posts/:id</span><span class="desc">Get post detail</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method delete">DEL</span><span class="path">/posts/:id</span><span class="desc">Delete post</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/posts/:id/like</span><span class="desc">Like / unlike post</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/posts/:id/save</span><span class="desc">Save / unsave post</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/posts/:id/comments</span><span class="desc">Get comments</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/posts/:id/comments</span><span class="desc">Add comment</span><span class="auth-badge">Auth</span></div>
+    </div>
+
+    <!-- Chat -->
+    <div class="group">
+      <div class="group-header">
+        <span class="group-icon">💬</span>
+        <span class="group-title">Chat</span>
+        <span class="group-count">9 endpoints</span>
+      </div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/chat</span><span class="desc">Get all conversations</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/chat</span><span class="desc">Create / get 1-on-1 chat</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/chat/group</span><span class="desc">Create group chat</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/chat/:id/messages</span><span class="desc">Get messages</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/chat/:id/messages</span><span class="desc">Send message</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/chat/:id/settings</span><span class="desc">Get chat settings</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method put">PUT</span><span class="path">/chat/:id/settings</span><span class="desc">Update settings</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/chat/:id/media</span><span class="desc">Get shared media</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method delete">DEL</span><span class="path">/chat/:id</span><span class="desc">Delete chat</span><span class="auth-badge">Auth</span></div>
+    </div>
+
+    <!-- Stories -->
+    <div class="group">
+      <div class="group-header">
+        <span class="group-icon">📖</span>
+        <span class="group-title">Stories</span>
+        <span class="group-count">4 endpoints</span>
+      </div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/stories/feed</span><span class="desc">Get story feed</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/stories</span><span class="desc">Create story</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/stories/:id/view</span><span class="desc">Mark story viewed</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method delete">DEL</span><span class="path">/stories/:id</span><span class="desc">Delete story</span><span class="auth-badge">Auth</span></div>
+    </div>
+
+    <!-- Reels -->
+    <div class="group">
+      <div class="group-header">
+        <span class="group-icon">🎬</span>
+        <span class="group-title">Reels</span>
+        <span class="group-count">5 endpoints</span>
+      </div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/reels/feed</span><span class="desc">Get reels feed</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/reels</span><span class="desc">Upload new reel</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/reels/:id</span><span class="desc">Get reel detail</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/reels/:id/like</span><span class="desc">Like / unlike reel</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/reels/:id/view</span><span class="desc">Record reel view</span><span class="auth-badge">Auth</span></div>
+    </div>
+
+    <!-- Boss / AI Agents -->
+    <div class="group">
+      <div class="group-header">
+        <span class="group-icon">🤖</span>
+        <span class="group-title">Boss AI Agents</span>
+        <span class="group-count">8 endpoints</span>
+      </div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/boss/order</span><span class="desc">Submit agent order</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/boss/quick-command</span><span class="desc">Execute quick command</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/boss/orders</span><span class="desc">List orders (paginated)</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/boss/orders/:id</span><span class="desc">Order detail + agent steps</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/boss/agents</span><span class="desc">List all 13 agents</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/boss/agents/:id</span><span class="desc">Agent detail + tools</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/boss/dashboard</span><span class="desc">Dashboard stats</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/boss/orders/:id/cancel</span><span class="desc">Cancel order</span><span class="auth-badge">Auth</span></div>
+    </div>
+
+    <!-- Notifications & Reports -->
+    <div class="group">
+      <div class="group-header">
+        <span class="group-icon">🔔</span>
+        <span class="group-title">Notifications & Reports</span>
+        <span class="group-count">4 endpoints</span>
+      </div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/notifications</span><span class="desc">Get notifications</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method put">PUT</span><span class="path">/notifications/read-all</span><span class="desc">Mark all read</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/reports</span><span class="desc">Submit report</span><span class="auth-badge">Auth</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/reports</span><span class="desc">Get reports (admin)</span><span class="auth-badge">Auth</span></div>
+    </div>
+
+    <!-- Health -->
+    <div class="group">
+      <div class="group-header">
+        <span class="group-icon">💚</span>
+        <span class="group-title">Health</span>
+        <span class="group-count">1 endpoint</span>
+      </div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/health</span><span class="desc">Server health check</span></div>
+    </div>
+
+    <footer>
+      <p>&copy; 2026 <a href="/">Nearfo</a> — All endpoints require JWT Bearer token unless noted.</p>
+    </footer>
+  </div>
+
+  <script>
+    fetch('/api/health').then(r => r.json()).then(d => {
+      document.getElementById('health-status').textContent = d.success ? 'Online' : 'Error';
+      document.getElementById('health-dot').style.background = d.success ? '#10B981' : '#EF4444';
+      if (d.version) document.getElementById('api-version').textContent = d.version;
+    }).catch(() => {
+      document.getElementById('health-status').textContent = 'Offline';
+      document.getElementById('health-dot').style.background = '#EF4444';
+    });
+  </script>
+</body>
+</html>

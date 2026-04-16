@@ -1,0 +1,30 @@
+APP NAME: Nearfo - Know Your Circle
+
+SHORT DESCRIPTION (80 chars max):
+Connect with people nearby. Share vibes, chat live, and discover your circle.
+
+FULL DESCRIPTION:
+
+Nearfo is a location-first social platform that connects you with the people around you. Whether you're exploring a new city or getting to know your neighborhood, Nearfo brings your local community to life.
+
+KEY FEATURES:
+
+Local Feed — See what people near you are sharing. 80% local content, 20% global vibes for the perfect mix.
+
+Discover Nearby — Find people, trending topics, and interesting conversations happening within 200km of you.
+
+Live Chat — Real-time messaging with typing indicators and online status. Connect instantly with people in your circle.
+
+Post Your Vibes — Share text posts with mood emojis and photo attachments. Express yourself authentically.
+
+Nearfo Score — Build your reputation in your local community. The more you engage, the higher your score.
+
+Interactive Map — See who's around you on a beautiful interactive map. Find new connections based on proximity.
+
+Privacy First — Your exact location is never shared. We only use approximate areas to connect you with nearby people.
+
+CATEGORY: Social
+CONTENT RATING: Everyone
+CONTACT EMAIL: er.akashsmorey@gmail.com
+WEBSITE: https://api.nearfo.com
+PRIVACY POLICY: https://api.nearfo.com/privacy
