@@ -505,13 +505,13 @@ class SocketService with WidgetsBindingObserver {
     _socket?.emit('live_leave', streamId);
   }
 
-  /// Send WebRTC offer (broadcaster -> all viewers in room)
+  /// Send WebRTC offer (broadcaster → all viewers in room)
   void sendLiveOffer({required String streamId, required Map<String, dynamic> offer}) {
     if (!_guardCall('sendLiveOffer')) return;
     _socket!.emit('live_offer', {'streamId': streamId, 'offer': offer});
   }
 
-  /// Send WebRTC answer (viewer -> host)
+  /// Send WebRTC answer (viewer → host)
   void sendLiveAnswer({required String hostId, required String viewerId, required Map<String, dynamic> answer}) {
     if (!_guardCall('sendLiveAnswer')) return;
     _socket!.emit('live_answer', {'hostId': hostId, 'viewerId': viewerId, 'answer': answer});
@@ -525,6 +525,26 @@ class SocketService with WidgetsBindingObserver {
       'streamId': streamId,
       'senderId': senderId,
       'candidate': candidate,
+    });
+  }
+
+  /// Send a live comment via socket (real-time delivery)
+  void sendLiveComment({required String streamId, required String userId, required String userName, required String text}) {
+    ensureConnected();
+    _socket?.emit('live_comment', {
+      'streamId': streamId,
+      'userId': userId,
+      'userName': userName,
+      'text': text,
+    });
+  }
+
+  /// Send a live like via socket (real-time delivery)
+  void sendLiveLike({required String streamId, required String userId}) {
+    ensureConnected();
+    _socket?.emit('live_like', {
+      'streamId': streamId,
+      'userId': userId,
     });
   }
 

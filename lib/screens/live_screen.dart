@@ -494,7 +494,9 @@ class _LiveScreenState extends State<LiveScreen> with TickerProviderStateMixin {
                             ],
                           ],
                         ),
-                        Text('@$handle', style: TextStyle(color: NearfoColors.textMuted, fontSize: 12)),
+                        if (handle.isNotEmpty && handle.length < 30 && !RegExp(r'^[a-f0-9]{24}$').hasMatch(handle))
+                          Text('@$handle', style: TextStyle(color: NearfoColors.textMuted, fontSize: 12),
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
                       ],
                     ),
                   ),
@@ -1013,16 +1015,25 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
     final text = _chatController.text.trim();
     if (text.isEmpty) return;
     _chatController.clear();
+    FocusScope.of(context).unfocus(); // dismiss keyboard after send
 
     final auth = context.read<AuthProvider>();
     final myName = auth.user?.name ?? 'You';
+    final myId = auth.user?.id ?? '';
 
     setState(() {
       _chatMessages.add({'user': myName, 'text': text, 'isMe': true});
     });
     _scrollToBottom();
 
-    await ApiService.sendLiveComment(_streamId, text);
+    // Send via socket for real-time delivery AND via API for persistence
+    SocketService.instance.sendLiveComment(
+      streamId: _streamId,
+      userId: myId,
+      userName: myName,
+      text: text,
+    );
+    ApiService.sendLiveComment(_streamId, text);
   }
 
   void _doubleTapLike() async {
@@ -1033,7 +1044,12 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
     _heartController.forward(from: 0).then((_) {
       if (mounted) setState(() => _showHeart = false);
     });
-    // Actually send like to server
+    // Send via socket for real-time + API for persistence
+    final auth = context.read<AuthProvider>();
+    SocketService.instance.sendLiveLike(
+      streamId: _streamId,
+      userId: auth.user?.id ?? '',
+    );
     ApiService.sendLiveLike(_streamId);
   }
 
@@ -1073,6 +1089,7 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
       },
       child: Scaffold(
         backgroundColor: Colors.black,
+        resizeToAvoidBottomInset: false,
         body: GestureDetector(
           onDoubleTap: _doubleTapLike,
           child: Stack(
@@ -1146,8 +1163,10 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                               ],
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          Text('@$handle', style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 14)),
+                          if (handle.isNotEmpty && handle.length < 30 && !RegExp(r'^[a-f0-9]{24}$').hasMatch(handle)) ...[
+                            const SizedBox(height: 4),
+                            Text('@$handle', style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 14)),
+                          ],
                           const SizedBox(height: 14),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -1291,7 +1310,7 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
 
             // ── Chat overlay (bottom) ──
             Positioned(
-              bottom: 0, left: 0, right: 0,
+              bottom: MediaQuery.of(context).viewInsets.bottom, left: 0, right: 0,
               child: Container(
                 height: MediaQuery.of(context).size.height * 0.38,
                 decoration: BoxDecoration(
@@ -2018,4 +2037,44 @@ class _LiveBroadcasterScreenState extends State<_LiveBroadcasterScreen> {
                   SafeArea(
                     top: false,
                     child: Padding(
-                      paddin
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _statBadge(Icons.remove_red_eye, '$_viewerCount', 'Viewers'),
+                          _statBadge(Icons.favorite, '$_likeCount', 'Likes'),
+                          _statBadge(Icons.chat_bubble_outline, '${_chatMessages.length}', 'Chats'),
+                          _statBadge(Icons.timer_outlined, _formattedDuration, 'Duration'),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+    );
+  }
+
+  Widget _statBadge(IconData icon, String value, String label) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: Colors.white, size: 20),
+        ),
+        const SizedBox(height: 4),
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
+      ],
+    );
+  }
+}
