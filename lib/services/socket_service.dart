@@ -47,6 +47,17 @@ class SocketService with WidgetsBindingObserver {
   // Reconnection stream — fires every time socket (re)connects
   final _reconnectedController = StreamController<void>.broadcast();
 
+  // Live streaming streams
+  final _liveCommentController = StreamController<Map<String, dynamic>>.broadcast();
+  final _liveLikeController = StreamController<Map<String, dynamic>>.broadcast();
+  final _liveViewerJoinedController = StreamController<Map<String, dynamic>>.broadcast();
+  final _liveViewerLeftController = StreamController<Map<String, dynamic>>.broadcast();
+  final _liveEndedController = StreamController<Map<String, dynamic>>.broadcast();
+  final _liveStartedController = StreamController<Map<String, dynamic>>.broadcast();
+  final _liveOfferController = StreamController<Map<String, dynamic>>.broadcast();
+  final _liveAnswerController = StreamController<Map<String, dynamic>>.broadcast();
+  final _liveIceController = StreamController<Map<String, dynamic>>.broadcast();
+
   // Call signaling streams
   final _incomingCallController = StreamController<Map<String, dynamic>>.broadcast();
   final _callAnsweredController = StreamController<Map<String, dynamic>>.broadcast();
@@ -71,6 +82,17 @@ class SocketService with WidgetsBindingObserver {
   Stream<Map<String, dynamic>> get onScreenshotTaken => _screenshotTakenController.stream;
   Stream<Map<String, dynamic>> get onUserBlocked => _userBlockedController.stream;
   Stream<Map<String, dynamic>> get onUserRestricted => _userRestrictedController.stream;
+
+  // Live streaming public streams
+  Stream<Map<String, dynamic>> get onLiveComment => _liveCommentController.stream;
+  Stream<Map<String, dynamic>> get onLiveLike => _liveLikeController.stream;
+  Stream<Map<String, dynamic>> get onLiveViewerJoined => _liveViewerJoinedController.stream;
+  Stream<Map<String, dynamic>> get onLiveViewerLeft => _liveViewerLeftController.stream;
+  Stream<Map<String, dynamic>> get onLiveEnded => _liveEndedController.stream;
+  Stream<Map<String, dynamic>> get onLiveStarted => _liveStartedController.stream;
+  Stream<Map<String, dynamic>> get onLiveOffer => _liveOfferController.stream;
+  Stream<Map<String, dynamic>> get onLiveAnswer => _liveAnswerController.stream;
+  Stream<Map<String, dynamic>> get onLiveIce => _liveIceController.stream;
 
   // Call signaling public streams
   Stream<Map<String, dynamic>> get onIncomingCall => _incomingCallController.stream;
@@ -306,6 +328,17 @@ class SocketService with WidgetsBindingObserver {
       _safeEmitToStream(_screenshotTakenController, data);
     });
 
+    // ===== Live Streaming Listeners =====
+    _socket!.on('live_comment', (data) => _safeEmitToStream(_liveCommentController, data));
+    _socket!.on('live_like', (data) => _safeEmitToStream(_liveLikeController, data));
+    _socket!.on('viewer_joined', (data) => _safeEmitToStream(_liveViewerJoinedController, data));
+    _socket!.on('viewer_left', (data) => _safeEmitToStream(_liveViewerLeftController, data));
+    _socket!.on('live_ended', (data) => _safeEmitToStream(_liveEndedController, data));
+    _socket!.on('live_started', (data) => _safeEmitToStream(_liveStartedController, data));
+    _socket!.on('live_offer', (data) => _safeEmitToStream(_liveOfferController, data));
+    _socket!.on('live_answer', (data) => _safeEmitToStream(_liveAnswerController, data));
+    _socket!.on('live_ice', (data) => _safeEmitToStream(_liveIceController, data));
+
     // ===== Call Signaling Listeners =====
     _socket!.on('incoming_call', (data) {
       debugPrint('[Socket] Incoming call');
@@ -354,6 +387,15 @@ class SocketService with WidgetsBindingObserver {
       _socket!.off('user_blocked');
       _socket!.off('user_restricted');
       _socket!.off('screenshot_taken');
+      _socket!.off('live_comment');
+      _socket!.off('live_like');
+      _socket!.off('viewer_joined');
+      _socket!.off('viewer_left');
+      _socket!.off('live_ended');
+      _socket!.off('live_started');
+      _socket!.off('live_offer');
+      _socket!.off('live_answer');
+      _socket!.off('live_ice');
       _socket!.off('incoming_call');
       _socket!.off('call_answered');
       _socket!.off('call_rejected');
@@ -450,6 +492,42 @@ class SocketService with WidgetsBindingObserver {
     _socket!.emit(event, data);
   }
 
+  // ===== Live Streaming Methods =====
+
+  /// Join a live stream socket room
+  void joinLiveStream(String streamId) {
+    ensureConnected();
+    _socket?.emit('live_join', streamId);
+  }
+
+  /// Leave a live stream socket room
+  void leaveLiveStream(String streamId) {
+    _socket?.emit('live_leave', streamId);
+  }
+
+  /// Send WebRTC offer (broadcaster -> all viewers in room)
+  void sendLiveOffer({required String streamId, required Map<String, dynamic> offer}) {
+    if (!_guardCall('sendLiveOffer')) return;
+    _socket!.emit('live_offer', {'streamId': streamId, 'offer': offer});
+  }
+
+  /// Send WebRTC answer (viewer -> host)
+  void sendLiveAnswer({required String hostId, required String viewerId, required Map<String, dynamic> answer}) {
+    if (!_guardCall('sendLiveAnswer')) return;
+    _socket!.emit('live_answer', {'hostId': hostId, 'viewerId': viewerId, 'answer': answer});
+  }
+
+  /// Send ICE candidate for live stream
+  void sendLiveIce({String? targetId, String? streamId, required String senderId, required Map<String, dynamic> candidate}) {
+    if (!_guardCall('sendLiveIce')) return;
+    _socket!.emit('live_ice', {
+      'targetId': targetId,
+      'streamId': streamId,
+      'senderId': senderId,
+      'candidate': candidate,
+    });
+  }
+
   // ===== Call Signaling Methods =====
   bool _guardCall(String method) {
     if (_socket == null || !_isConnected) {
@@ -537,6 +615,15 @@ class SocketService with WidgetsBindingObserver {
     _screenshotTakenController.close();
     _userBlockedController.close();
     _userRestrictedController.close();
+    _liveCommentController.close();
+    _liveLikeController.close();
+    _liveViewerJoinedController.close();
+    _liveViewerLeftController.close();
+    _liveEndedController.close();
+    _liveStartedController.close();
+    _liveOfferController.close();
+    _liveAnswerController.close();
+    _liveIceController.close();
     _incomingCallController.close();
     _callAnsweredController.close();
     _callRejectedController.close();

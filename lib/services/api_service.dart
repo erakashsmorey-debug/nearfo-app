@@ -2267,6 +2267,18 @@ class ApiService {
     } catch (e) { return ApiResponse.error('Network error: $e'); }
   }
 
+
+  /// Like a live stream (heart reaction)
+  static Future<ApiResponse<Map<String, dynamic>>> sendLiveLike(String streamId) async {
+    try {
+      final res = await http.post(Uri.parse('$_baseUrl/live/$streamId/like'), headers: _headers).timeout(_timeout);
+      final data = _decodeResponse(res);
+      if (data['success'] == true) return ApiResponse.success(Map<String, dynamic>.from(data));
+      return ApiResponse.error(data.asString('message', 'Failed'));
+    } on TimeoutException { return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
   /// Leave a live stream (viewer exits)
   static Future<ApiResponse<void>> leaveLiveStream(String streamId) async {
     try {

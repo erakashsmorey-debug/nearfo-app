@@ -3,10 +3,12 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../utils/constants.dart';
 import '../services/api_service.dart';
+import '../services/socket_service.dart';
 import '../providers/auth_provider.dart';
 import '../l10n/l10n_helper.dart';
 
@@ -29,6 +31,8 @@ class _LiveScreenState extends State<LiveScreen> with TickerProviderStateMixin {
   late AnimationController _pulseController;
   late AnimationController _fabController;
   Timer? _refreshTimer;
+  StreamSubscription? _liveStartedSub;
+  StreamSubscription? _liveEndedSub;
 
   @override
   void initState() {
@@ -44,6 +48,11 @@ class _LiveScreenState extends State<LiveScreen> with TickerProviderStateMixin {
     _loadStreams();
     // Auto-refresh every 15s for live feel
     _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) => _loadStreams(silent: true));
+
+    // Real-time: listen for new streams starting / ending
+    final socket = SocketService.instance;
+    _liveStartedSub = socket.onLiveStarted.listen((_) => _loadStreams(silent: true));
+    _liveEndedSub = socket.onLiveEnded.listen((_) => _loadStreams(silent: true));
   }
 
   @override
@@ -51,6 +60,8 @@ class _LiveScreenState extends State<LiveScreen> with TickerProviderStateMixin {
     _pulseController.dispose();
     _fabController.dispose();
     _refreshTimer?.cancel();
+    _liveStartedSub?.cancel();
+    _liveEndedSub?.cancel();
     super.dispose();
   }
 
@@ -130,6 +141,7 @@ class _LiveScreenState extends State<LiveScreen> with TickerProviderStateMixin {
   // ── Build ──
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: NearfoColors.bg,
       body: CustomScrollView(
@@ -191,12 +203,12 @@ class _LiveScreenState extends State<LiveScreen> with TickerProviderStateMixin {
                       BoxShadow(color: Colors.red.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 3)),
                     ],
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.videocam_rounded, color: Colors.white, size: 18),
-                      SizedBox(width: 6),
-                      Text(context.l10n.liveGoLive, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+                      const Icon(Icons.videocam_rounded, color: Colors.white, size: 18),
+                      const SizedBox(width: 6),
+                      Text(l10n.liveGoLive, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
                     ],
                   ),
                 ),
@@ -228,6 +240,7 @@ class _LiveScreenState extends State<LiveScreen> with TickerProviderStateMixin {
 
   // ── Empty State ──
   Widget _buildEmptyState() {
+    final l10n = context.l10n;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
@@ -270,12 +283,12 @@ class _LiveScreenState extends State<LiveScreen> with TickerProviderStateMixin {
                     BoxShadow(color: Colors.red.withOpacity(0.3), blurRadius: 16, offset: const Offset(0, 6)),
                   ],
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.videocam_rounded, color: Colors.white, size: 22),
-                    SizedBox(width: 10),
-                    Text(context.l10n.liveStartTitle, style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                    const Icon(Icons.videocam_rounded, color: Colors.white, size: 22),
+                    const SizedBox(width: 10),
+                    Text(l10n.liveStartTitle, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
                   ],
                 ),
               ),
@@ -541,27 +554,30 @@ class _GoLiveSheet extends StatefulWidget {
 }
 
 class _GoLiveSheetState extends State<_GoLiveSheet> {
-  String _selectedCategory = 'General';
-  late List<String> _categories;
+  String _selectedCategory = '';
+  List<String> _categories = [];
 
   @override
-  void initState() {
-    super.initState();
-    _categories = [
-      context.l10n.liveCategoryGeneral,
-      context.l10n.liveCategoryGaming,
-      context.l10n.liveCategoryMusic,
-      context.l10n.liveCategoryCooking,
-      context.l10n.liveCategoryFitness,
-      context.l10n.liveCategoryEducation,
-      context.l10n.liveCategoryChat,
-      context.l10n.liveCategoryOther,
-    ];
-    _selectedCategory = _categories[0];
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_categories.isEmpty) {
+      _categories = [
+        context.l10n.liveCategoryGeneral,
+        context.l10n.liveCategoryGaming,
+        context.l10n.liveCategoryMusic,
+        context.l10n.liveCategoryCooking,
+        context.l10n.liveCategoryFitness,
+        context.l10n.liveCategoryEducation,
+        context.l10n.liveCategoryChat,
+        context.l10n.liveCategoryOther,
+      ];
+      _selectedCategory = _categories[0];
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Container(
       height: MediaQuery.of(context).size.height * 0.65,
       decoration: BoxDecoration(
@@ -597,7 +613,7 @@ class _GoLiveSheetState extends State<_GoLiveSheet> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(context.l10n.liveGoLive, style: TextStyle(color: NearfoColors.text, fontSize: 22, fontWeight: FontWeight.w800)),
+                    Text(l10n.liveGoLive, style: TextStyle(color: NearfoColors.text, fontSize: 22, fontWeight: FontWeight.w800)),
                     Text('Start streaming to your audience', style: TextStyle(color: NearfoColors.textMuted, fontSize: 13)),
                   ],
                 ),
@@ -671,7 +687,7 @@ class _GoLiveSheetState extends State<_GoLiveSheet> {
             child: GestureDetector(
               onTap: () {
                 final title = widget.titleController.text.trim().isEmpty
-                    ? context.l10n.liveLiveDefault
+                    ? l10n.liveLiveDefault
                     : widget.titleController.text.trim();
                 Navigator.pop(context, {'title': title, 'category': _selectedCategory});
               },
@@ -704,6 +720,7 @@ class _GoLiveSheetState extends State<_GoLiveSheet> {
 
 // ════════════════════════════════════════════════════════════
 // LIVE VIEWER SCREEN — Full-screen live viewing experience
+// with real WebRTC video + Socket.io real-time chat/likes
 // ════════════════════════════════════════════════════════════
 
 class _LiveViewerScreen extends StatefulWidget {
@@ -723,10 +740,26 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
   int _viewerCount = 0;
   int _likeCount = 0;
   Timer? _refreshTimer;
-  Timer? _chatPollTimer;
   bool _streamEnded = false;
 
+  // Socket subscriptions
+  StreamSubscription? _commentSub;
+  StreamSubscription? _likeSub;
+  StreamSubscription? _viewerJoinedSub;
+  StreamSubscription? _viewerLeftSub;
+  StreamSubscription? _endedSub;
+
+  // WebRTC — viewer side
+  RTCPeerConnection? _peerConnection;
+  final _remoteRenderer = RTCVideoRenderer();
+  bool _hasRemoteStream = false;
+  StreamSubscription? _offerSub;
+  StreamSubscription? _iceSub;
+
   String get _streamId => widget.stream['_id']?.toString() ?? '';
+  String get _hostId => widget.stream['host'] is Map
+      ? (widget.stream['host'] as Map)['_id']?.toString() ?? ''
+      : widget.stream['host']?.toString() ?? '';
 
   @override
   void initState() {
@@ -737,10 +770,171 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
     // Add initial welcome message
     _chatMessages.add({'user': 'System', 'text': 'Welcome to the live stream!', 'isSystem': true});
 
-    // Refresh viewer/like count every 10s
+    // Initialize WebRTC renderer
+    _remoteRenderer.initialize().then((_) => _initWebRTC());
+
+    // Join socket room for real-time events
+    SocketService.instance.joinLiveStream(_streamId);
+
+    // Socket listeners for real-time
+    _setupSocketListeners();
+
+    // Fallback: refresh viewer/like count every 10s via API (if socket misses)
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _refreshStreamInfo());
-    // Poll for new chat messages every 5s
-    _chatPollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollChat());
+  }
+
+  void _setupSocketListeners() {
+    final socket = SocketService.instance;
+
+    _commentSub = socket.onLiveComment.listen((data) {
+      if (!mounted || _streamEnded) return;
+      final auth = context.read<AuthProvider>();
+      final myId = auth.user?.id ?? '';
+      final senderId = data['userId']?.toString() ?? '';
+      if (senderId == myId) return; // Skip own messages
+      setState(() {
+        _chatMessages.add({
+          'user': data['userName']?.toString() ?? 'Viewer',
+          'text': data['text']?.toString() ?? '',
+        });
+      });
+      _scrollToBottom();
+    });
+
+    _likeSub = socket.onLiveLike.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _likeCount = (data['totalLikes'] as int?) ?? _likeCount + 1;
+      });
+    });
+
+    _viewerJoinedSub = socket.onLiveViewerJoined.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _viewerCount = (data['currentViewers'] as int?) ?? _viewerCount + 1;
+      });
+      final name = data['viewerName']?.toString();
+      if (name != null && name.isNotEmpty) {
+        setState(() {
+          _chatMessages.add({'user': 'System', 'text': '$name joined', 'isSystem': true});
+        });
+        _scrollToBottom();
+      }
+    });
+
+    _viewerLeftSub = socket.onLiveViewerLeft.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _viewerCount = (data['currentViewers'] as int?) ?? max(0, _viewerCount - 1);
+      });
+    });
+
+    _endedSub = socket.onLiveEnded.listen((data) {
+      if (!mounted || _streamEnded) return;
+      final endedStreamId = data['streamId']?.toString();
+      if (endedStreamId == _streamId) {
+        setState(() => _streamEnded = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This live stream has ended'), backgroundColor: Colors.red),
+        );
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) Navigator.pop(context);
+        });
+      }
+    });
+  }
+
+  Future<void> _initWebRTC() async {
+    try {
+      final iceServers = await ApiService.getTurnCredentials();
+      final config = {
+        'iceServers': iceServers.isNotEmpty ? iceServers : [{'urls': 'stun:stun.l.google.com:19302'}],
+        'sdpSemantics': 'unified-plan',
+      };
+
+      _peerConnection = await createPeerConnection(config);
+
+      _peerConnection!.onTrack = (event) {
+        if (event.streams.isNotEmpty && mounted) {
+          setState(() {
+            _remoteRenderer.srcObject = event.streams[0];
+            _hasRemoteStream = true;
+          });
+        }
+      };
+
+      _peerConnection!.onIceCandidate = (candidate) {
+        if (candidate.candidate != null) {
+          SocketService.instance.sendLiveIce(
+            targetId: _hostId,
+            senderId: context.read<AuthProvider>().user?.id ?? '',
+            candidate: candidate.toMap(),
+          );
+        }
+      };
+
+      _peerConnection!.onIceConnectionState = (state) {
+        debugPrint('[LiveViewer] ICE state: $state');
+        if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
+            state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+          if (mounted && !_streamEnded) {
+            setState(() => _hasRemoteStream = false);
+          }
+        }
+      };
+
+      // Add receive-only transceiver so host knows we want video+audio
+      await _peerConnection!.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+      await _peerConnection!.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+
+      // Listen for offer from host
+      _offerSub = SocketService.instance.onLiveOffer.listen((data) async {
+        if (!mounted || _peerConnection == null) return;
+        try {
+          final offer = data['offer'];
+          if (offer == null) return;
+          final sdp = RTCSessionDescription(offer['sdp'], offer['type']);
+          await _peerConnection!.setRemoteDescription(sdp);
+          final answer = await _peerConnection!.createAnswer();
+          await _peerConnection!.setLocalDescription(answer);
+          SocketService.instance.sendLiveAnswer(
+            hostId: _hostId,
+            viewerId: context.read<AuthProvider>().user?.id ?? '',
+            answer: answer.toMap(),
+          );
+        } catch (e) {
+          debugPrint('[LiveViewer] Error handling offer: $e');
+        }
+      });
+
+      // Listen for ICE candidates from host
+      _iceSub = SocketService.instance.onLiveIce.listen((data) async {
+        if (!mounted || _peerConnection == null) return;
+        try {
+          final c = data['candidate'];
+          if (c == null) return;
+          final candidate = RTCIceCandidate(c['candidate'], c['sdpMid'], c['sdpMLineIndex']);
+          await _peerConnection!.addCandidate(candidate);
+        } catch (e) {
+          debugPrint('[LiveViewer] Error adding ICE: $e');
+        }
+      });
+
+      // Emit a signal so host knows to send offer
+      SocketService.instance.emit('live_viewer_ready', {
+        'streamId': _streamId,
+        'viewerId': context.read<AuthProvider>().user?.id ?? '',
+      });
+
+    } catch (e) {
+      debugPrint('[LiveViewer] WebRTC init error: $e');
+    }
   }
 
   @override
@@ -749,11 +943,20 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
     _scrollController.dispose();
     _heartController.dispose();
     _refreshTimer?.cancel();
-    _chatPollTimer?.cancel();
+    _commentSub?.cancel();
+    _likeSub?.cancel();
+    _viewerJoinedSub?.cancel();
+    _viewerLeftSub?.cancel();
+    _endedSub?.cancel();
+    _offerSub?.cancel();
+    _iceSub?.cancel();
+    _peerConnection?.close();
+    _remoteRenderer.dispose();
+    SocketService.instance.leaveLiveStream(_streamId);
     super.dispose();
   }
 
-  /// Refresh viewer count and like count from server
+  /// Refresh viewer count and like count from server (fallback)
   Future<void> _refreshStreamInfo() async {
     if (_streamEnded || _streamId.isEmpty) return;
     final res = await ApiService.getLiveStreamInfo(_streamId);
@@ -763,7 +966,6 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
       if (info['status'] == 'ended' || info['isActive'] == false) {
         setState(() => _streamEnded = true);
         _refreshTimer?.cancel();
-        _chatPollTimer?.cancel();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('This live stream has ended'), backgroundColor: Colors.red),
@@ -776,32 +978,6 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
         _viewerCount = (info['currentViewers'] as int?) ?? _viewerCount;
         _likeCount = (info['likes'] as int?) ?? (info['likeCount'] as int?) ?? _likeCount;
       });
-    }
-  }
-
-  /// Poll for new chat messages
-  Future<void> _pollChat() async {
-    if (_streamEnded || _streamId.isEmpty) return;
-    final res = await ApiService.getLiveComments(_streamId);
-    if (res.isSuccess && res.data != null && mounted) {
-      final serverMessages = res.data!;
-      // Only add messages we don't already have (compare by length — simple dedup)
-      final nonSystemCount = _chatMessages.where((m) => m['isSystem'] != true && m['isMe'] != true).length;
-      if (serverMessages.length > nonSystemCount) {
-        // Add new messages from server
-        final newMsgs = serverMessages.skip(nonSystemCount);
-        final auth = context.read<AuthProvider>();
-        final myId = auth.user?.id ?? '';
-        for (final msg in newMsgs) {
-          final senderId = msg['userId']?.toString() ?? msg['user']?['_id']?.toString() ?? '';
-          if (senderId == myId) continue; // Skip own messages (already shown)
-          final senderName = msg['userName']?.toString() ?? msg['user']?['name']?.toString() ?? 'Viewer';
-          setState(() {
-            _chatMessages.add({'user': senderName, 'text': msg['text']?.toString() ?? ''});
-          });
-        }
-        _scrollToBottom();
-      }
     }
   }
 
@@ -849,7 +1025,7 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
     await ApiService.sendLiveComment(_streamId, text);
   }
 
-  void _doubleTapLike() {
+  void _doubleTapLike() async {
     setState(() {
       _showHeart = true;
       _likeCount++;
@@ -857,6 +1033,8 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
     _heartController.forward(from: 0).then((_) {
       if (mounted) setState(() => _showHeart = false);
     });
+    // Actually send like to server
+    ApiService.sendLiveLike(_streamId);
   }
 
   Widget _viewerStatChip(IconData icon, String text) {
@@ -899,108 +1077,106 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
           onDoubleTap: _doubleTapLike,
           child: Stack(
             children: [
-              // ── Premium animated background ──
-              Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFF0a0a1a), Color(0xFF0f1535), Color(0xFF1a0a2e), Color(0xFF0a0a1a)],
-                    stops: [0.0, 0.3, 0.7, 1.0],
+              // ── Video / Fallback background ──
+              if (_hasRemoteStream)
+                Positioned.fill(
+                  child: RTCVideoView(
+                    _remoteRenderer,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    mirror: false,
                   ),
-                ),
-              ),
-
-              // ── Host center display (premium) ──
-              Positioned.fill(
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 120),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Animated ring around avatar
-                        Container(
-                          width: 140, height: 140,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFFFF0050), Color(0xFFFF4444), Color(0xFFFF8800), Color(0xFFFF0050)],
-                            ),
-                            boxShadow: [
-                              BoxShadow(color: Colors.red.withOpacity(0.3), blurRadius: 30, spreadRadius: 4),
-                              BoxShadow(color: Colors.red.withOpacity(0.15), blurRadius: 60, spreadRadius: 10),
-                            ],
-                          ),
-                          padding: const EdgeInsets.all(4),
-                          child: Container(
-                            decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF0a0a1a)),
-                            padding: const EdgeInsets.all(3),
-                            child: CircleAvatar(
-                              radius: 63,
-                              backgroundColor: const Color(0xFF1a1a2e),
-                              backgroundImage: avatar.isNotEmpty ? CachedNetworkImageProvider(NearfoConfig.resolveMediaUrl(avatar)) : null,
-                              child: avatar.isEmpty
-                                  ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                      style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w800, color: Colors.white))
-                                  : null,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        // Host name + verified badge
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(name, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
-                            if (isVerified) ...[
-                              const SizedBox(width: 6),
-                              const Icon(Icons.verified, color: Colors.blue, size: 20),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text('@$handle', style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 14)),
-                        const SizedBox(height: 14),
-                        // Stream title pill
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.06),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white.withOpacity(0.08)),
-                          ),
-                          child: Text(title,
-                            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                        ),
-                        if (category.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(category,
-                              style: const TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w600)),
-                          ),
-                        ],
-                        const SizedBox(height: 16),
-                        // Stats row
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _viewerStatChip(Icons.remove_red_eye_outlined, '$_viewerCount watching'),
-                            const SizedBox(width: 10),
-                            _viewerStatChip(Icons.favorite, '$_likeCount likes'),
-                          ],
-                        ),
-                      ],
+                )
+              else
+                Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0xFF0a0a1a), Color(0xFF0f1535), Color(0xFF1a0a2e), Color(0xFF0a0a1a)],
+                      stops: [0.0, 0.3, 0.7, 1.0],
                     ),
                   ),
                 ),
-              ),
+
+              // ── Host center display (shown when no video) ──
+              if (!_hasRemoteStream)
+                Positioned.fill(
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: MediaQuery.of(context).size.height * 0.35),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Animated ring around avatar
+                          Container(
+                            width: 140, height: 140,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFFFF0050), Color(0xFFFF4444), Color(0xFFFF8800), Color(0xFFFF0050)],
+                              ),
+                              boxShadow: [
+                                BoxShadow(color: Colors.red.withOpacity(0.3), blurRadius: 30, spreadRadius: 4),
+                                BoxShadow(color: Colors.red.withOpacity(0.15), blurRadius: 60, spreadRadius: 10),
+                              ],
+                            ),
+                            padding: const EdgeInsets.all(4),
+                            child: Container(
+                              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF0a0a1a)),
+                              padding: const EdgeInsets.all(3),
+                              child: CircleAvatar(
+                                radius: 63,
+                                backgroundColor: const Color(0xFF1a1a2e),
+                                backgroundImage: avatar.isNotEmpty ? CachedNetworkImageProvider(NearfoConfig.resolveMediaUrl(avatar)) : null,
+                                child: avatar.isEmpty
+                                    ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                        style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w800, color: Colors.white))
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(name, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+                              if (isVerified) ...[
+                                const SizedBox(width: 6),
+                                const Icon(Icons.verified, color: Colors.blue, size: 20),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text('@$handle', style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 14)),
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.white.withOpacity(0.08)),
+                            ),
+                            child: Text(title,
+                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ),
+                          if (category.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(category,
+                                style: const TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w600)),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
 
               // ── Top bar (premium glass) ──
               Positioned(
@@ -1010,7 +1186,7 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Row(
                       children: [
-                        // Host chip (compact)
+                        // Host chip
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                           decoration: BoxDecoration(
@@ -1042,7 +1218,7 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                           ),
                         ),
                         const SizedBox(width: 8),
-                        // LIVE badge (gradient + glow)
+                        // LIVE badge
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
@@ -1076,6 +1252,23 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                             ],
                           ),
                         ),
+                        const SizedBox(width: 6),
+                        // Like count
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.4),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.favorite, color: Colors.pinkAccent.withOpacity(0.9), size: 13),
+                              const SizedBox(width: 4),
+                              Text('$_likeCount', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
                         const Spacer(),
                         // Close button
                         GestureDetector(
@@ -1100,12 +1293,17 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
             Positioned(
               bottom: 0, left: 0, right: 0,
               child: Container(
-                height: MediaQuery.of(context).size.height * 0.4,
+                height: MediaQuery.of(context).size.height * 0.38,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Colors.black.withOpacity(0.85)],
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.4),
+                      Colors.black.withOpacity(0.92),
+                    ],
+                    stops: const [0.0, 0.25, 1.0],
                   ),
                 ),
                 child: Column(
@@ -1114,19 +1312,23 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                     Expanded(
                       child: ListView.builder(
                         controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(16, 40, 16, 8),
+                        padding: const EdgeInsets.fromLTRB(16, 30, 16, 8),
                         itemCount: _chatMessages.length,
                         itemBuilder: (_, i) {
                           final msg = _chatMessages[i];
                           final isSystem = msg['isSystem'] == true;
                           final isMe = msg['isMe'] == true;
                           return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.only(bottom: 6),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                               decoration: BoxDecoration(
-                                color: isSystem ? Colors.amber.withOpacity(0.08) : Colors.white.withOpacity(0.04),
-                                borderRadius: BorderRadius.circular(12),
+                                color: isSystem
+                                    ? Colors.amber.withOpacity(0.1)
+                                    : isMe
+                                        ? Colors.cyanAccent.withOpacity(0.06)
+                                        : Colors.white.withOpacity(0.05),
+                                borderRadius: BorderRadius.circular(14),
                               ),
                               child: RichText(
                                 text: TextSpan(
@@ -1142,8 +1344,9 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                                     TextSpan(
                                       text: msg['text'],
                                       style: TextStyle(
-                                        color: isSystem ? Colors.amber.withOpacity(0.8) : Colors.white.withOpacity(0.9),
+                                        color: isSystem ? Colors.amber.withOpacity(0.85) : Colors.white.withOpacity(0.92),
                                         fontSize: 13,
+                                        height: 1.3,
                                       ),
                                     ),
                                   ],
@@ -1159,28 +1362,28 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                     SafeArea(
                       top: false,
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
                         child: Row(
                           children: [
                             // Chat input
                             Expanded(
                               child: Container(
-                                height: 44,
+                                height: 42,
                                 padding: const EdgeInsets.symmetric(horizontal: 16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.08),
+                                  color: Colors.white.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(color: Colors.white.withOpacity(0.08)),
+                                  border: Border.all(color: Colors.white.withOpacity(0.1)),
                                 ),
                                 child: TextField(
                                   controller: _chatController,
                                   style: const TextStyle(color: Colors.white, fontSize: 14),
                                   decoration: InputDecoration(
                                     hintText: 'Say something...',
-                                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14),
+                                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 14),
                                     border: InputBorder.none,
                                     isDense: true,
-                                    contentPadding: const EdgeInsets.symmetric(vertical: 11),
+                                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
                                   ),
                                   onSubmitted: (_) => _sendChat(),
                                 ),
@@ -1191,11 +1394,15 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                             GestureDetector(
                               onTap: _sendChat,
                               child: Container(
-                                width: 44, height: 44,
+                                width: 42, height: 42,
                                 decoration: BoxDecoration(
-                                  gradient: const LinearGradient(colors: [Color(0xFFFF0050), Color(0xFFFF4444)]),
-                                  borderRadius: BorderRadius.circular(22),
-                                  boxShadow: [BoxShadow(color: Colors.red.withOpacity(0.3), blurRadius: 8)],
+                                  gradient: const LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [Color(0xFFFF0050), Color(0xFFFF4444)],
+                                  ),
+                                  borderRadius: BorderRadius.circular(21),
+                                  boxShadow: [BoxShadow(color: const Color(0xFFFF0050).withOpacity(0.35), blurRadius: 12, offset: const Offset(0, 3))],
                                 ),
                                 child: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
                               ),
@@ -1205,10 +1412,14 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                             GestureDetector(
                               onTap: _doubleTapLike,
                               child: Container(
-                                width: 44, height: 44,
+                                width: 42, height: 42,
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.08),
-                                  borderRadius: BorderRadius.circular(22),
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [Colors.pinkAccent.withOpacity(0.15), Colors.pinkAccent.withOpacity(0.08)],
+                                  ),
+                                  borderRadius: BorderRadius.circular(21),
                                   border: Border.all(color: Colors.pinkAccent.withOpacity(0.3)),
                                 ),
                                 child: const Icon(Icons.favorite, color: Colors.pinkAccent, size: 20),
@@ -1219,11 +1430,11 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
                             GestureDetector(
                               onTap: _shareStream,
                               child: Container(
-                                width: 44, height: 44,
+                                width: 42, height: 42,
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.08),
-                                  borderRadius: BorderRadius.circular(22),
-                                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                                  borderRadius: BorderRadius.circular(21),
+                                  border: Border.all(color: Colors.white.withOpacity(0.12)),
                                 ),
                                 child: const Icon(Icons.share_rounded, color: Colors.white, size: 18),
                               ),
@@ -1261,7 +1472,8 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> with TickerProvide
 }
 
 // ════════════════════════════════════════════════════════════
-// LIVE BROADCASTER SCREEN — Host's view while streaming
+// LIVE BROADCASTER SCREEN — Host's view with live camera
+// + WebRTC streaming + Socket.io real-time chat
 // ════════════════════════════════════════════════════════════
 
 class _LiveBroadcasterScreen extends StatefulWidget {
@@ -1278,10 +1490,25 @@ class _LiveBroadcasterScreenState extends State<_LiveBroadcasterScreen> {
   int _durationSeconds = 0;
   Timer? _durationTimer;
   Timer? _refreshTimer;
-  Timer? _chatPollTimer;
   final List<Map<String, dynamic>> _chatMessages = [];
   final _scrollController = ScrollController();
   bool _isEnding = false;
+  bool _isFrontCamera = true;
+
+  // Socket subscriptions
+  StreamSubscription? _commentSub;
+  StreamSubscription? _likeSub;
+  StreamSubscription? _viewerJoinedSub;
+  StreamSubscription? _viewerLeftSub;
+  StreamSubscription? _viewerReadySub;
+  StreamSubscription? _answerSub;
+  StreamSubscription? _iceSub;
+
+  // WebRTC — broadcaster side
+  final _localRenderer = RTCVideoRenderer();
+  MediaStream? _localStream;
+  bool _cameraReady = false;
+  final Map<String, RTCPeerConnection> _peerConnections = {};
 
   String get _streamId => widget.stream['_id']?.toString() ?? '';
 
@@ -1293,22 +1520,236 @@ class _LiveBroadcasterScreenState extends State<_LiveBroadcasterScreen> {
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _durationSeconds++);
     });
-    // Refresh viewer/like count every 8s
+    // Refresh viewer/like count every 8s (fallback)
     _refreshTimer = Timer.periodic(const Duration(seconds: 8), (_) => _refreshStreamInfo());
-    // Poll for new chat messages every 4s
-    _chatPollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _pollChat());
+
+    // Initialize camera + WebRTC
+    _localRenderer.initialize().then((_) => _initCamera());
+
+    // Join socket room
+    SocketService.instance.joinLiveStream(_streamId);
+
+    // Socket listeners
+    _setupSocketListeners();
+  }
+
+  Future<void> _initCamera() async {
+    try {
+      _localStream = await navigator.mediaDevices.getUserMedia({
+        'video': {
+          'facingMode': 'user',
+          'width': {'ideal': 1280},
+          'height': {'ideal': 720},
+          'frameRate': {'ideal': 30},
+        },
+        'audio': true,
+      });
+      _localRenderer.srcObject = _localStream;
+      if (mounted) setState(() => _cameraReady = true);
+    } catch (e) {
+      debugPrint('[LiveBroadcaster] Camera init error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Camera access error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  void _setupSocketListeners() {
+    final socket = SocketService.instance;
+
+    _commentSub = socket.onLiveComment.listen((data) {
+      if (!mounted || _isEnding) return;
+      setState(() {
+        _chatMessages.add({
+          'user': data['userName']?.toString() ?? 'Viewer',
+          'text': data['text']?.toString() ?? '',
+        });
+      });
+      _scrollToBottom();
+    });
+
+    _likeSub = socket.onLiveLike.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _likeCount = (data['totalLikes'] as int?) ?? _likeCount + 1;
+      });
+    });
+
+    _viewerJoinedSub = socket.onLiveViewerJoined.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _viewerCount = (data['currentViewers'] as int?) ?? _viewerCount + 1;
+      });
+      final name = data['viewerName']?.toString();
+      if (name != null && name.isNotEmpty) {
+        setState(() {
+          _chatMessages.add({'user': 'System', 'text': '$name joined', 'isSystem': true});
+        });
+        _scrollToBottom();
+      }
+    });
+
+    _viewerLeftSub = socket.onLiveViewerLeft.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _viewerCount = (data['currentViewers'] as int?) ?? max(0, _viewerCount - 1);
+      });
+      // Cleanup peer connection for this viewer
+      final viewerId = data['viewerId']?.toString();
+      if (viewerId != null) {
+        _peerConnections[viewerId]?.close();
+        _peerConnections.remove(viewerId);
+      }
+    });
+
+    // When a viewer signals they're ready, create a peer connection + send offer
+    _viewerReadySub = socket.onLiveOffer.listen((_) {}); // placeholder, actual logic below
+    // Override: listen for 'live_viewer_ready' via generic emit
+    SocketService.instance.emit('_noop', {}); // ensure socket alive
+    // We use the socket directly for viewer_ready
+    _setupViewerReadyListener();
+
+    // Listen for answers from viewers
+    _answerSub = socket.onLiveAnswer.listen((data) async {
+      final viewerId = data['viewerId']?.toString();
+      if (viewerId == null || !_peerConnections.containsKey(viewerId)) return;
+      try {
+        final answer = data['answer'];
+        if (answer == null) return;
+        final sdp = RTCSessionDescription(answer['sdp'], answer['type']);
+        await _peerConnections[viewerId]!.setRemoteDescription(sdp);
+      } catch (e) {
+        debugPrint('[LiveBroadcaster] Error setting answer: $e');
+      }
+    });
+
+    // Listen for ICE candidates from viewers
+    _iceSub = socket.onLiveIce.listen((data) async {
+      final senderId = data['senderId']?.toString();
+      if (senderId == null || !_peerConnections.containsKey(senderId)) return;
+      try {
+        final c = data['candidate'];
+        if (c == null) return;
+        final candidate = RTCIceCandidate(c['candidate'], c['sdpMid'], c['sdpMLineIndex']);
+        await _peerConnections[senderId]!.addCandidate(candidate);
+      } catch (e) {
+        debugPrint('[LiveBroadcaster] Error adding viewer ICE: $e');
+      }
+    });
+  }
+
+  void _setupViewerReadyListener() {
+    // Listen via raw socket for viewer_ready events (not in standard streams)
+    // We reuse onLiveOffer but check for viewerId (viewer_ready is a custom event)
+    // Actually, the server would need to forward 'live_viewer_ready' to host.
+    // For now, we send offer when a viewer joins the room via the viewer_joined event.
+    // This is triggered by the REST /join endpoint which emits viewer_joined.
+    _viewerJoinedSub?.cancel();
+    _viewerJoinedSub = SocketService.instance.onLiveViewerJoined.listen((data) async {
+      if (!mounted || _isEnding) return;
+      final viewerId = data['viewerId']?.toString();
+      setState(() {
+        _viewerCount = (data['currentViewers'] as int?) ?? _viewerCount + 1;
+      });
+      final name = data['viewerName']?.toString();
+      if (name != null && name.isNotEmpty) {
+        setState(() {
+          _chatMessages.add({'user': 'System', 'text': '$name joined', 'isSystem': true});
+        });
+        _scrollToBottom();
+      }
+      // Create peer connection for this viewer and send offer
+      if (viewerId != null && _localStream != null) {
+        await _createPeerConnectionForViewer(viewerId);
+      }
+    });
+  }
+
+  Future<void> _createPeerConnectionForViewer(String viewerId) async {
+    try {
+      final iceServers = await ApiService.getTurnCredentials();
+      final config = {
+        'iceServers': iceServers.isNotEmpty ? iceServers : [{'urls': 'stun:stun.l.google.com:19302'}],
+        'sdpSemantics': 'unified-plan',
+      };
+
+      final pc = await createPeerConnection(config);
+      _peerConnections[viewerId] = pc;
+
+      // Add local tracks to this peer connection
+      for (final track in _localStream!.getTracks()) {
+        await pc.addTrack(track, _localStream!);
+      }
+
+      pc.onIceCandidate = (candidate) {
+        if (candidate.candidate != null) {
+          SocketService.instance.sendLiveIce(
+            targetId: viewerId,
+            senderId: context.read<AuthProvider>().user?.id ?? '',
+            candidate: candidate.toMap(),
+          );
+        }
+      };
+
+      pc.onIceConnectionState = (state) {
+        debugPrint('[LiveBroadcaster] ICE state for $viewerId: $state');
+        if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
+            state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+          pc.close();
+          _peerConnections.remove(viewerId);
+        }
+      };
+
+      // Create offer and send to viewer via socket
+      final offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      SocketService.instance.sendLiveOffer(
+        streamId: _streamId,
+        offer: offer.toMap(),
+      );
+    } catch (e) {
+      debugPrint('[LiveBroadcaster] Error creating PC for viewer $viewerId: $e');
+    }
+  }
+
+  void _switchCamera() async {
+    if (_localStream == null) return;
+    final videoTrack = _localStream!.getVideoTracks().firstOrNull;
+    if (videoTrack != null) {
+      await Helper.switchCamera(videoTrack);
+      setState(() => _isFrontCamera = !_isFrontCamera);
+    }
   }
 
   @override
   void dispose() {
     _durationTimer?.cancel();
     _refreshTimer?.cancel();
-    _chatPollTimer?.cancel();
     _scrollController.dispose();
+    _commentSub?.cancel();
+    _likeSub?.cancel();
+    _viewerJoinedSub?.cancel();
+    _viewerLeftSub?.cancel();
+    _viewerReadySub?.cancel();
+    _answerSub?.cancel();
+    _iceSub?.cancel();
+    // Close all peer connections
+    for (final pc in _peerConnections.values) {
+      pc.close();
+    }
+    _peerConnections.clear();
+    // Stop camera
+    _localStream?.getTracks().forEach((track) => track.stop());
+    _localStream?.dispose();
+    _localRenderer.dispose();
+    SocketService.instance.leaveLiveStream(_streamId);
     super.dispose();
   }
 
-  /// Refresh viewer count and like count from server
+  /// Refresh viewer count and like count from server (fallback)
   Future<void> _refreshStreamInfo() async {
     if (_isEnding || _streamId.isEmpty) return;
     final res = await ApiService.getLiveStreamInfo(_streamId);
@@ -1318,26 +1759,6 @@ class _LiveBroadcasterScreenState extends State<_LiveBroadcasterScreen> {
         _viewerCount = (info['currentViewers'] as int?) ?? _viewerCount;
         _likeCount = (info['likes'] as int?) ?? (info['likeCount'] as int?) ?? _likeCount;
       });
-    }
-  }
-
-  /// Poll for new chat messages from viewers
-  Future<void> _pollChat() async {
-    if (_isEnding || _streamId.isEmpty) return;
-    final res = await ApiService.getLiveComments(_streamId);
-    if (res.isSuccess && res.data != null && mounted) {
-      final serverMessages = res.data!;
-      final nonSystemCount = _chatMessages.where((m) => m['isSystem'] != true).length;
-      if (serverMessages.length > nonSystemCount) {
-        final newMsgs = serverMessages.skip(nonSystemCount);
-        for (final msg in newMsgs) {
-          final senderName = msg['userName']?.toString() ?? msg['user']?['name']?.toString() ?? 'Viewer';
-          setState(() {
-            _chatMessages.add({'user': senderName, 'text': msg['text']?.toString() ?? ''});
-          });
-        }
-        _scrollToBottom();
-      }
     }
   }
 
@@ -1387,8 +1808,15 @@ class _LiveBroadcasterScreenState extends State<_LiveBroadcasterScreen> {
     if (confirm == true) {
       _isEnding = true;
       _refreshTimer?.cancel();
-      _chatPollTimer?.cancel();
       _durationTimer?.cancel();
+      // Close all peer connections
+      for (final pc in _peerConnections.values) {
+        pc.close();
+      }
+      _peerConnections.clear();
+      // Stop camera
+      _localStream?.getTracks().forEach((track) => track.stop());
+
       await ApiService.endLiveStream(_streamId);
       if (mounted) {
         // Show summary
@@ -1402,7 +1830,7 @@ class _LiveBroadcasterScreenState extends State<_LiveBroadcasterScreen> {
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.check_circle, color: Colors.green, size: 48),
+                const Icon(Icons.check_circle, color: Colors.green, size: 48),
                 const SizedBox(height: 12),
                 Text('Duration: $_formattedDuration', style: TextStyle(color: NearfoColors.textMuted, fontSize: 15)),
                 const SizedBox(height: 4),
@@ -1438,28 +1866,35 @@ class _LiveBroadcasterScreenState extends State<_LiveBroadcasterScreen> {
         backgroundColor: Colors.black,
         body: Stack(
           children: [
-            // ── Background ──
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [const Color(0xFF0d0d0d), const Color(0xFF1a1a2e), const Color(0xFF16213e)],
+            // ── Camera preview / Fallback background ──
+            if (_cameraReady)
+              Positioned.fill(
+                child: RTCVideoView(
+                  _localRenderer,
+                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  mirror: _isFrontCamera,
+                ),
+              )
+            else
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [const Color(0xFF0d0d0d), const Color(0xFF1a1a2e), const Color(0xFF16213e)],
+                  ),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(color: Colors.red, strokeWidth: 2),
+                      const SizedBox(height: 16),
+                      Text('Starting camera...', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14)),
+                    ],
+                  ),
                 ),
               ),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.videocam_rounded, color: Colors.red, size: 64),
-                    const SizedBox(height: 12),
-                    const Text('You are Live!', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 4),
-                    Text('Streaming to your audience', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14)),
-                  ],
-                ),
-              ),
-            ),
 
             // ── Top bar ──
           Positioned(
@@ -1504,6 +1939,20 @@ class _LiveBroadcasterScreenState extends State<_LiveBroadcasterScreen> {
                       ),
                     ),
                     const Spacer(),
+                    // Switch camera button
+                    if (_cameraReady)
+                      GestureDetector(
+                        onTap: _switchCamera,
+                        child: Container(
+                          width: 36, height: 36,
+                          margin: const EdgeInsets.only(right: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.4),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.cameraswitch_rounded, color: Colors.white, size: 18),
+                        ),
+                      ),
                     // End stream button
                     GestureDetector(
                       onTap: _endStream,
@@ -1569,44 +2018,4 @@ class _LiveBroadcasterScreenState extends State<_LiveBroadcasterScreen> {
                   SafeArea(
                     top: false,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _statBadge(Icons.remove_red_eye, '$_viewerCount', 'Viewers'),
-                          _statBadge(Icons.favorite, '$_likeCount', 'Likes'),
-                          _statBadge(Icons.chat_bubble_outline, '${_chatMessages.length}', 'Chats'),
-                          _statBadge(Icons.timer_outlined, _formattedDuration, 'Duration'),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    ),
-    );
-  }
-
-  Widget _statBadge(IconData icon, String value, String label) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(icon, color: Colors.white, size: 20),
-        ),
-        const SizedBox(height: 4),
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
-        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10)),
-      ],
-    );
-  }
-}
+                      paddin
