@@ -278,6 +278,7 @@ class StoryRowState extends State<StoryRow> {
               child: Container(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
+                  color: NearfoColors.bg,
                   border: Border.all(color: NearfoColors.bg, width: 2),
                 ),
                 child: ClipOval(
