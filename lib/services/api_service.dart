@@ -2042,6 +2042,21 @@ class ApiService {
     } catch (e) { return ApiResponse.error('Network error: $e'); }
   }
 
+  /// GET /api/stories/user/:userId — Get active stories for a specific user
+  static Future<ApiResponse<Map<String, dynamic>>> getUserStories(String userId) async {
+    try {
+      _setupDioInterceptors();
+      final res = await _dio.get('/stories/user/$userId');
+      final data = _decodeResponse(res);
+      if (data['success'] == true) {
+        return ApiResponse.success(data);
+      }
+      return ApiResponse.error(data.asString('message', 'Failed'));
+    } on TimeoutException {
+      return ApiResponse.error('Request timed out.');
+    } catch (e) { return ApiResponse.error('Network error: $e'); }
+  }
+
   static Future<ApiResponse<int>> viewStory(String storyId) async {
     try {
       final res = await http.post(Uri.parse('$_baseUrl/stories/$storyId/view'), headers: _headers).timeout(_timeout);
